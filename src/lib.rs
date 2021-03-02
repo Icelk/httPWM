@@ -63,7 +63,12 @@ pub enum Command {
 /// - if nothing happened, sleep 'till next scheduler
 ///
 /// This allows the thread to be `unpark()`ed.
-pub struct Controller {
-    pin: Arc<Mutex<rppal::pwm::Pwm>>,
-    scheduler: scheduler::Handler,
+pub struct Controller;
+impl Controller {
+    pub fn new(pwm: rppal::pwm::Pwm) -> Self {
+        // make channel
+        // spawn thread, moving `pwm`
+        // return Self with the channel and JoinHandle
+        Self
+    }
 }
