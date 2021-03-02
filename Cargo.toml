@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 rppal = "0.11.3"
 kvarn = { path = "kvarn", no-default-features = true, optional = true }
+chrono = "0.4.19"
 
 [features]
 default = ["bin"]

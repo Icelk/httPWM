@@ -1,4 +1,5 @@
-use std::time::Duration;
+use chrono::{prelude::*, Duration};
+pub mod scheduler;
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Strength(f32);
@@ -24,18 +25,18 @@ pub enum Day {
     Friday,
     Saturday,
     Sunday,
-    All,
 }
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub struct DayTime(Duration);
-impl DayTime {
-    /// Converts hours and minutes to a duration (from 00:00).
-    pub fn from_hour_minutes(hours: u8, minuts: u8) -> Self {
-        assert!(hours < 24);
-        assert!(minuts < 60);
-
-        let seconds = hours as u64 * 3600 + minuts as u64 * 60;
-        Self(Duration::new(seconds, 0))
+impl Day {
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Monday => Self::Tuesday,
+            Self::Tuesday => Self::Wednesday,
+            Self::Wednesday => Self::Thursday,
+            Self::Thursday => Self::Friday,
+            Self::Friday => Self::Saturday,
+            Self::Saturday => Self::Sunday,
+            Self::Sunday => Self::Monday,
+        }
     }
 }
 
@@ -46,5 +47,5 @@ pub enum Command {
     LinearDecrease(Transition),
     SineIncrease(Transition),
     SineDecrease(Transition),
-    ChangeDayTimer(Day, DayTime),
+    ChangeDayTimer(Day, NaiveTime),
 }
