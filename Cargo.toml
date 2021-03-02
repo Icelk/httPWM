@@ -6,6 +6,15 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "pwm_http"
+path = "src/bin/main.rs"
+doc = false
+required-features = ["bin"]
+
+[lib]
+name = "pwm_dev"
+
 [dependencies]
 rppal = "0.11.3"
 kvarn = { path = "kvarn", no-default-features = true, optional = true }

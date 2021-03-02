@@ -1,5 +1,7 @@
-use chrono::{prelude::*, Duration};
 pub mod scheduler;
+use chrono::{prelude::*, Duration};
+pub use scheduler::Scheduler;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Strength(f32);
@@ -48,4 +50,20 @@ pub enum Command {
     SineIncrease(Transition),
     SineDecrease(Transition),
     ChangeDayTimer(Day, NaiveTime),
+}
+
+/// # Main loop of thread
+///
+/// - check for new commands
+/// > If got new, reset state of transition!
+/// - check all schedulers
+/// > Get minimum, and if any are due, cancel transition.
+/// - check transition
+/// > Progress state of transition or remove if complete
+/// - if nothing happened, sleep 'till next scheduler
+///
+/// This allows the thread to be `unpark()`ed.
+pub struct Controller {
+    pin: Arc<Mutex<rppal::pwm::Pwm>>,
+    scheduler: scheduler::Handler,
 }

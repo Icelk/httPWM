@@ -1,10 +1,8 @@
-mod lib;
 use chrono::prelude::*;
-use kvarn;
-use lib::scheduler::Scheduler;
+use pwm_dev::*;
 
 fn main() {
-    let scheduler = lib::scheduler::RepeatingScheduler(NaiveTime::from_hms(7, 0, 0));
+    let scheduler = scheduler::RepeatingScheduler(NaiveTime::from_hms(7, 0, 0));
     let next = scheduler.get_next();
     println!(
         "Time: {}:{}",
