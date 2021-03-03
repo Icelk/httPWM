@@ -66,8 +66,3 @@ impl Scheduler for RepeatingScheduler {
         next - now
     }
 }
-
-/// The handler's job is to handle [`Scheduler`]s and transitions.
-///
-/// This is done by spawning a thread and running all code on it.
-pub struct Handler;
