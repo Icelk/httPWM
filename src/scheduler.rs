@@ -236,23 +236,27 @@ impl State {
                     Action::Set(self.get_transition_output().unwrap())
                 }
             },
+            // check internal transition state; get_output()
             None => {
+                match self.get_transition_output() {
+                    Some(s) => Action::Set(s),
+                    None => {
                 // check wake up Option<>
                 match self.wake_up.take() {
-                    Some(command) => self.process(Some(command)),
-                    // check internal transition state; get_output()
-                    None => match self.get_transition_output() {
-                        Some(s) => Action::Set(s),
-                        None => {
+                            Some(command) => {
+                                println!("Waking uo");
+
+                                self.process(Some(command))
+                            }
                             // check finish flag
-                            match self.finish {
+                            None => match self.finish {
                                 true => Action::Break,
                                 // in ↓ make sure a variable is stored of what to do when you've been woken up.
                                 // else, send sleep command 'till schedulers.iter().min()
                                 false => Action::Wait(self.queue_sleep()),
+                            },
                             }
                         }
-                    },
                 }
             }
         }
