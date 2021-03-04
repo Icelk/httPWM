@@ -72,7 +72,8 @@ impl VariableOut for Pwm {
 pub struct PrintOut;
 impl VariableOut for PrintOut {
     fn set(&mut self, value: Strength) {
-        println!("Set dur! {:?}", value);
+        println!("Got strength {:?}", value);
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -102,17 +103,32 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         let handle = thread::spawn(move || {
             let receiver = receiver;
             let mut state = scheduler::State::new(scheduler);
+            let mut sleeping: Option<Instant> = Option::None;
             loop {
-                let action = state.process(receiver.try_recv().ok());
-                println!("got action: {:?}", action);
-                match action {
-                    Action::Wait(sleep) => {
-                        println!("got sleep {:?}", &sleep);
-                        match sleep {
-                            scheduler::SleepTime::Duration(dur) => thread::sleep(dur),
-                            scheduler::SleepTime::Forever => thread::park(),
-                        }
+                let command = match receiver.try_recv().ok() {
+                    Some(r) => {
+                        sleeping = None;
+                        Some(r)
                     }
+                    None => match sleeping {
+                        Some(target) => match target.checked_duration_since(Instant::now()) {
+                            Some(_) => {
+                                thread::yield_now();
+                                continue;
+                            }
+                            None => None,
+                        },
+                        None => None,
+                    },
+                };
+                let action = state.process(command);
+                match action {
+                    Action::Wait(sleep) => match sleep {
+                        scheduler::SleepTime::Duration(dur) => {
+                            sleeping = Some(Instant::now() + dur);
+                        }
+                        scheduler::SleepTime::Forever => thread::park(),
+                    },
                     Action::Set(s) => output.set(s),
                     Action::Break => break,
                 }

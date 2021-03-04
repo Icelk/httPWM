@@ -143,13 +143,16 @@ impl TransitionState {
     pub fn process(&mut self, delta_time: Duration) -> Strength {
         match self.transition.interpolation {
             TransitionInterpolation::Linear => {
-                self.progress += self.transition.time.as_secs_f64() / delta_time.as_secs_f64();
+                self.progress += delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
                 Strength::new_clamped(self.progress)
             }
             TransitionInterpolation::Sine => {
-                self.progress += self.transition.time.as_secs_f64() / delta_time.as_secs_f64();
-                // if progress is 1, then output should be 1. a range of 0-PI yields 0-1-0, therefore 0-2/PI yields 0-1
-                Strength::new_clamped((self.progress * core::f64::consts::PI / 2.0).sin())
+                const HALF_PI: f64 = core::f64::consts::PI / 2.0;
+                let advanced = delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
+                self.progress += advanced;
+                let strength =
+                    ((self.progress * core::f64::consts::PI - HALF_PI).sin() + 1.0) / 2.0;
+                Strength::new_clamped(strength)
             }
         }
     }
@@ -170,6 +173,7 @@ pub struct State {
     wake_up: Option<Command>,
     transition: Option<TransitionState>,
     last_instance: Instant,
+    last_scheduler: Option<usize>,
 }
 impl State {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -180,6 +184,7 @@ impl State {
             wake_up: None,
             transition: None,
             last_instance: Instant::now(),
+            last_scheduler: None,
         }
     }
     pub fn add_scheduler(&mut self, scheduler: Box<dyn Scheduler>) {
@@ -187,7 +192,6 @@ impl State {
     }
 
     pub fn process(&mut self, command: Option<Command>) -> Action {
-        println!("Processing {:?}", command);
         match command {
             Some(command) => match command {
                 Command::Finish => {
@@ -238,15 +242,32 @@ impl State {
             },
             // check internal transition state; get_output()
             None => {
+                // todo!("what if scheduler is in middle of transition?");
                 match self.get_transition_output() {
                     Some(s) => Action::Set(s),
                     None => {
-                // check wake up Option<>
-                match self.wake_up.take() {
+                        // check wake up Option<>
+                        match self.wake_up.take() {
                             Some(command) => {
-                                println!("Waking uo");
+                                match self.last_scheduler {
+                                    Some(index) => match self.schedulers.get_mut(index) {
+                                        Some(scheduler) => match scheduler.add() {
+                                            Keep::Keep => {}
+                                            Keep::Remove => {
+                                                self.schedulers.remove(index);
+                                            }
+                                        },
+                                        None => {
+                                            panic!("attempting to get scheduler not existing. Did you clear the list?");
+                                        }
+                                    },
+                                    None => {
+                                        self.day_schedule.add();
+                                    }
+                                }
+                                let action = self.process(Some(command));
 
-                                self.process(Some(command))
+                                action
                             }
                             // check finish flag
                             None => match self.finish {
@@ -255,8 +276,8 @@ impl State {
                                 // else, send sleep command 'till schedulers.iter().min()
                                 false => Action::Wait(self.queue_sleep()),
                             },
-                            }
                         }
+                    }
                 }
             }
         }
@@ -271,14 +292,21 @@ impl State {
 
     fn get_transition_output(&mut self) -> Option<Strength> {
         if self.transition.is_some() {
+            println!("Now: {:?}, last: {:?}", Instant::now(), &self.last_instance);
             let delta_time = self.get_delta_time();
             // unwrap() is ok, since transition.is_some()
-            Some(self.transition.as_mut().unwrap().process(delta_time))
+            let transition = self.transition.as_mut().unwrap();
+            let strength = transition.process(delta_time);
+            if transition.progress > 1.0 {
+                self.transition = None;
+                Some(Strength::new(1.0))
+            } else {
+                Some(strength)
+            }
         } else {
             None
         }
     }
-    /// If None
     fn queue_sleep(&mut self) -> SleepTime {
         let next = self
             .schedulers
