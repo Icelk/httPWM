@@ -97,7 +97,7 @@ impl Scheduler for WeekScheduler {
                     now.date().succ().and_time(next).unwrap()
                 };
                 Some((
-                    (next - now).to_std().expect("duration is negative"),
+                    (next - now).to_std().expect("duration is negative") - self.transition.time,
                     Command::SetTransition(Transition::clone(&self.transition)),
                 ))
             }
@@ -118,7 +118,7 @@ impl Scheduler for RepeatingScheduler {
             now.date().succ().and_time(next).unwrap()
         };
         Some((
-            (next - now).to_std().expect("duration is negative"),
+            (next - now).to_std().expect("duration is negative") - self.1.time,
             Command::SetTransition(Transition::clone(&self.1)),
         ))
     }
