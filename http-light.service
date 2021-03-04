@@ -1,0 +1,9 @@
+[Unit]
+Description=HTTP light service
+
+[Service]
+Type=simple
+ExecStart=sh -c "~/.cargo/bin/pwm_http"
+
+[Install]
+WantedBy=default.target
