@@ -22,6 +22,12 @@ impl Strength {
             Self(value)
         }
     }
+    pub fn is_off(&self) -> bool {
+        self.0 == 0.0
+    }
+    pub fn into_inner(self) -> f64 {
+        self.0
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
@@ -50,23 +56,38 @@ pub enum Command {
 }
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Action {
-    /// Thread sleep this amount and call me again
-    Wait(scheduler::SleepTime),
-    /// Set the output to this strength
-    Set(Strength),
+    /// Thread sleep this amount and call me again.
+    /// `bool` will be true if you should turn off the output.
+    Wait(scheduler::SleepTime, bool),
+    /// Set the output to this strength.
+    /// If `bool` is true, you must enable the output.
+    Set(Strength, bool),
     /// Stop execution of loop
     Break,
 }
 
 pub trait VariableOut {
+    /// Main function. Used to set output.
     fn set(&mut self, value: Strength);
+
+    /// Enable the output when activating. Here for optimization of power usage when using PWM.
+    fn enable(&mut self);
+    /// Disable the output when not active. Here for optimization of power usage when using PWM.
+    fn disable(&mut self);
 }
 impl VariableOut for Pwm {
     fn set(&mut self, value: Strength) {
-        self.set_period(Duration::from_micros(1000)).unwrap();
         self.set_pulse_width(Duration::from_micros((value.0 * 1000.0).round() as u64))
             .unwrap();
         self.set_period(Duration::from_micros(1000)).unwrap();
+    }
+    fn enable(&mut self) {
+        println!("Disabling software PWM.");
+        Pwm::enable(self).expect("failed to enable hardware PWM");
+    }
+    fn disable(&mut self) {
+        println!("Disabling hardware PWM.");
+        Pwm::disable(self).expect("failed to disable hardware PWM");
     }
 }
 impl VariableOut for OutputPin {
@@ -77,6 +98,10 @@ impl VariableOut for OutputPin {
         )
         .unwrap();
     }
+    fn enable(&mut self) {}
+    fn disable(&mut self) {
+        OutputPin::clear_pwm(self).expect("failed to stop software PWM")
+    }
 }
 
 pub struct PrintOut;
@@ -84,6 +109,12 @@ impl VariableOut for PrintOut {
     fn set(&mut self, value: Strength) {
         println!("Got strength {:?}", value);
         thread::sleep(Duration::from_millis(100));
+    }
+    fn enable(&mut self) {
+        println!("Enabling output");
+    }
+    fn disable(&mut self) {
+        println!("Disabling output");
     }
 }
 
@@ -146,13 +177,23 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 };
                 let action = state.process(command);
                 match action {
-                    Action::Wait(sleep) => match sleep {
-                        scheduler::SleepTime::Duration(dur) => {
-                            sleeping = Sleeping::To(Instant::now() + dur)
+                    Action::Wait(sleep, turn_off) => {
+                        if turn_off {
+                            output.disable();
                         }
-                        scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
-                    },
-                    Action::Set(s) => output.set(s),
+                        match sleep {
+                            scheduler::SleepTime::Duration(dur) => {
+                                sleeping = Sleeping::To(Instant::now() + dur)
+                            }
+                            scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
+                        }
+                    }
+                    Action::Set(s, enable) => {
+                        if enable {
+                            output.enable();
+                        }
+                        output.set(s)
+                    }
                     Action::Break => break,
                 }
             }

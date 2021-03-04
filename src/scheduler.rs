@@ -11,6 +11,7 @@ pub trait Scheduler: Debug + Send {
     fn add(&mut self) -> Keep {
         Keep::Remove
     }
+    /// Main function. It gets the time to the next occurrence of this Scheduler.
     fn get_next(&self) -> Option<(Duration, Command)>;
 }
 
@@ -96,8 +97,14 @@ impl Scheduler for WeekScheduler {
                 } else {
                     now.date().succ().and_time(next).unwrap()
                 };
+                // The expect here should never happen, we checked above if now is less than next.
+                let next = (next - now)
+                    .to_std()
+                    .expect("duration is negative")
+                    .checked_sub(self.transition.time)
+                    .unwrap_or(Duration::new(0, 0));
                 Some((
-                    (next - now).to_std().expect("duration is negative") - self.transition.time,
+                    next,
                     Command::SetTransition(Transition::clone(&self.transition)),
                 ))
             }
@@ -153,6 +160,8 @@ pub struct State {
     transition: Option<TransitionState>,
     last_instance: Instant,
     last_scheduler: Option<usize>,
+    // If the output is 0
+    off: bool,
 }
 impl State {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -164,6 +173,7 @@ impl State {
             transition: None,
             last_instance: Instant::now(),
             last_scheduler: None,
+            off: false,
         }
     }
     pub fn add_scheduler(&mut self, scheduler: Box<dyn Scheduler>) {
@@ -181,23 +191,25 @@ impl State {
                         None => Action::Break,
                         // else return get_output
                         // Ok, because a transition exists, which will yield a value
-                        Some(s) => Action::Set(s),
+                        Some(s) => Action::Set(s, self.process_enable()),
                     }
                 }
                 Command::Set(strength) => {
                     // clear animation
                     self.transition = None;
+                    let off = self.off;
+                    self.off = strength.is_off();
                     // send back set
-                    Action::Set(strength)
+                    Action::Set(strength, off)
                 }
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
                     *self.day_schedule.get_mut(day) = time;
                     // get_output
                     match self.get_transition_output() {
-                        Some(s) => Action::Set(s),
+                        Some(s) => Action::Set(s, self.process_enable()),
                         // get_sleep
-                        None => Action::Wait(self.queue_sleep()),
+                        None => Action::Wait(self.queue_sleep(), self.off),
                     }
                 }
                 Command::ChangeDayTimerTransition(new_transition) => {
@@ -216,7 +228,7 @@ impl State {
                     self.transition = Some(TransitionState::new(transition));
                     self.last_instance = Instant::now();
                     // unwrap() is ok; we've just set transition to be `Some`
-                    Action::Set(self.get_transition_output().unwrap())
+                    Action::Set(self.get_transition_output().unwrap(), self.process_enable())
                 }
             },
             None => {
@@ -245,13 +257,13 @@ impl State {
                     }
                     // check internal transition state; get_output()
                     None => match self.get_transition_output() {
-                        Some(s) => Action::Set(s),
+                        Some(s) => Action::Set(s, self.process_enable()),
                         // check finish flag
                         None => match self.finish {
                             true => Action::Break,
                             // in ↓ make sure a variable is stored of what to do when you've been woken up.
                             // else, send sleep command 'till schedulers.iter().min()
-                            false => Action::Wait(self.queue_sleep()),
+                            false => Action::Wait(self.queue_sleep(), self.off),
                         },
                     },
                 }
@@ -273,8 +285,10 @@ impl State {
             let transition = self.transition.as_mut().unwrap();
             let strength = transition.process(delta_time);
             if transition.progress > 1.0 {
+                let final_strength = Strength::clone(&transition.transition.to);
                 self.transition = None;
-                Some(Strength::new(1.0))
+                self.off = final_strength.is_off();
+                Some(final_strength)
             } else {
                 Some(strength)
             }
@@ -308,9 +322,9 @@ impl State {
     }
     fn get_next(&mut self) -> Action {
         match self.get_transition_output() {
-            Some(s) => Action::Set(s),
+            Some(s) => Action::Set(s, self.off),
             // get_sleep
-            None => Action::Wait(self.queue_sleep()),
+            None => Action::Wait(self.queue_sleep(), self.off),
         }
     }
     fn wake(&mut self) -> Option<Command> {
@@ -321,5 +335,12 @@ impl State {
             },
             None => None,
         }
+    }
+    fn process_enable(&mut self) -> bool {
+        let off = self.off;
+        if off {
+            self.off = false;
+        }
+        off
     }
 }
