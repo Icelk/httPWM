@@ -77,6 +77,13 @@ impl VariableOut for PrintOut {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+enum Sleeping {
+    Forever,
+    To(Instant),
+    Wake,
+}
+
 /// # Main loop of thread
 ///
 /// - check for new commands
@@ -103,31 +110,37 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         let handle = thread::spawn(move || {
             let receiver = receiver;
             let mut state = scheduler::State::new(scheduler);
-            let mut sleeping: Option<Instant> = Option::None;
+            let mut sleeping: Sleeping = Sleeping::Wake;
             loop {
                 let command = match receiver.try_recv().ok() {
                     Some(r) => {
-                        sleeping = None;
+                        sleeping = Sleeping::Wake;
                         Some(r)
                     }
                     None => match sleeping {
-                        Some(target) => match target.checked_duration_since(Instant::now()) {
-                            Some(_) => {
-                                thread::yield_now();
-                                continue;
+                        Sleeping::To(instant) => {
+                            match instant.checked_duration_since(Instant::now()) {
+                                Some(_) => {
+                                    thread::sleep(Duration::from_millis(1));
+                                    continue;
+                                }
+                                None => None,
                             }
-                            None => None,
-                        },
-                        None => None,
+                        }
+                        Sleeping::Forever => {
+                            thread::sleep(Duration::from_millis(1));
+                            continue;
+                        }
+                        Sleeping::Wake => None,
                     },
                 };
                 let action = state.process(command);
                 match action {
                     Action::Wait(sleep) => match sleep {
                         scheduler::SleepTime::Duration(dur) => {
-                            sleeping = Some(Instant::now() + dur);
+                            sleeping = Sleeping::To(Instant::now() + dur);
                         }
-                        scheduler::SleepTime::Forever => thread::park(),
+                        scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
                     },
                     Action::Set(s) => output.set(s),
                     Action::Break => break,
@@ -147,8 +160,6 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         self.channel
             .send(command)
             .expect("failed to send message on channel");
-        // thread::sleep(Duration::from_millis(10));
-        self.handle.thread().unpark();
     }
 
     /// Will wait on any transitions to conclude and then give back the underlying object
