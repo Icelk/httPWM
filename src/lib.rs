@@ -63,17 +63,17 @@ pub trait VariableOut {
 }
 impl VariableOut for Pwm {
     fn set(&mut self, value: Strength) {
-        self.set_period(Duration::from_micros(10000)).unwrap();
-        self.set_pulse_width(Duration::from_micros((value.0 * 10000.0).round() as u64))
+        self.set_period(Duration::from_micros(1000)).unwrap();
+        self.set_pulse_width(Duration::from_micros((value.0 * 1000.0).round() as u64))
             .unwrap();
-        self.set_period(Duration::from_micros(10000)).unwrap();
+        self.set_period(Duration::from_micros(1000)).unwrap();
     }
 }
 impl VariableOut for OutputPin {
     fn set(&mut self, value: Strength) {
         self.set_pwm(
-            Duration::from_micros(10000),
-            Duration::from_micros((value.0 * 10000.0).round() as u64),
+            Duration::from_micros(1000),
+            Duration::from_micros((value.0 * 1000.0).round() as u64),
         )
         .unwrap();
     }
