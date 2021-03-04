@@ -9,8 +9,8 @@ use std::{sync::mpsc, thread};
 pub struct Strength(f64);
 impl Strength {
     pub fn new(value: f64) -> Self {
-        assert!(value < 1.0);
-        assert!(value > 0.0);
+        assert!(value <= 1.0);
+        assert!(value >= 0.0);
         Self(value)
     }
     pub fn new_clamped(value: f64) -> Self {
