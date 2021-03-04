@@ -17,7 +17,10 @@ fn main() {
         interpolation: TransitionInterpolation::Sine,
     };
     let scheduler = scheduler::WeekScheduler::same(in_three_minutes, transition.clone());
+    #[cfg(feature = "test")]
     let mut controller = Controller::new(PrintOut, scheduler);
+    #[cfg(not(feature = "test"))]
+    let mut controller = Controller::new(pwm, scheduler);
 
     controller.send(Command::Set(Strength::new(0.75)));
     sleep(Duration::from_secs(2));
