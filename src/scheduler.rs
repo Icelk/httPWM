@@ -106,27 +106,6 @@ impl Scheduler for WeekScheduler {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub struct RepeatingScheduler(pub NaiveTime, pub Transition);
-impl Scheduler for RepeatingScheduler {
-    fn get_next(&self) -> Option<(Duration, Command)> {
-        let now = Local::now();
-        let next = self.0;
-        let next = if now.time() < next {
-            now.date().and_time(next).unwrap()
-        } else {
-            now.date().succ().and_time(next).unwrap()
-        };
-        Some((
-            (next - now).to_std().expect("duration is negative") - self.1.time,
-            Command::SetTransition(Transition::clone(&self.1)),
-        ))
-    }
-    fn add(&mut self) -> Keep {
-        Keep::Keep
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct TransitionState {
     transition: Transition,
