@@ -30,7 +30,9 @@ fn main() {
     sleep(Duration::from_secs(1));
 
     println!("Sending set command");
-    controller.send(Command::Set(Strength::new(0.1)));
+    controller.send(Command::Set(Strength::new(0.25)));
+
+    sleep(Duration::from_secs(3));
 
     controller.finish();
 }

@@ -1,6 +1,6 @@
 pub mod scheduler;
 use chrono::prelude::*;
-use rppal::pwm::Pwm;
+use rppal::{gpio::OutputPin, pwm::Pwm};
 pub use scheduler::Scheduler;
 use std::time::{Duration, Instant};
 use std::{sync::mpsc, thread};
@@ -148,7 +148,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 match action {
                     Action::Wait(sleep) => match sleep {
                         scheduler::SleepTime::Duration(dur) => {
-                            sleeping = Sleeping::To(Instant::now() + dur);
+                            sleeping = Sleeping::To(Instant::now() + dur)
                         }
                         scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
                     },

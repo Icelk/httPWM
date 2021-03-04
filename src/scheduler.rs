@@ -170,7 +170,7 @@ pub struct State {
     schedulers: Vec<Box<dyn Scheduler>>,
 
     finish: bool,
-    wake_up: Option<Command>,
+    wake_up: Option<(Instant, Command)>,
     transition: Option<TransitionState>,
     last_instance: Instant,
     last_scheduler: Option<usize>,
@@ -192,6 +192,7 @@ impl State {
     }
 
     pub fn process(&mut self, command: Option<Command>) -> Action {
+        println!("got command {:?}", command);
         match command {
             Some(command) => match command {
                 Command::Finish => {
@@ -240,44 +241,41 @@ impl State {
                     Action::Set(self.get_transition_output().unwrap())
                 }
             },
-            // check internal transition state; get_output()
             None => {
-                // todo!("what if scheduler is in middle of transition?");
-                match self.get_transition_output() {
-                    Some(s) => Action::Set(s),
-                    None => {
-                        // check wake up Option<>
-                        match self.wake_up.take() {
-                            Some(command) => {
-                                match self.last_scheduler {
-                                    Some(index) => match self.schedulers.get_mut(index) {
-                                        Some(scheduler) => match scheduler.add() {
-                                            Keep::Keep => {}
-                                            Keep::Remove => {
-                                                self.schedulers.remove(index);
-                                            }
-                                        },
-                                        None => {
-                                            panic!("attempting to get scheduler not existing. Did you clear the list?");
-                                        }
-                                    },
-                                    None => {
-                                        self.day_schedule.add();
+                // check wake up Option<>
+                match self.wake() {
+                    Some(command) => {
+                        match self.last_scheduler {
+                            Some(index) => match self.schedulers.get_mut(index) {
+                                Some(scheduler) => match scheduler.add() {
+                                    Keep::Keep => {}
+                                    Keep::Remove => {
+                                        self.schedulers.remove(index);
                                     }
+                                },
+                                None => {
+                                    panic!("attempting to get scheduler not existing. Did you clear the list?");
                                 }
-                                let action = self.process(Some(command));
-
-                                action
-                            }
-                            // check finish flag
-                            None => match self.finish {
-                                true => Action::Break,
-                                // in ↓ make sure a variable is stored of what to do when you've been woken up.
-                                // else, send sleep command 'till schedulers.iter().min()
-                                false => Action::Wait(self.queue_sleep()),
                             },
+                            None => {
+                                self.day_schedule.add();
+                            }
                         }
+                        let action = self.process(Some(command));
+
+                        action
                     }
+                    // check internal transition state; get_output()
+                    None => match self.get_transition_output() {
+                        Some(s) => Action::Set(s),
+                        // check finish flag
+                        None => match self.finish {
+                            true => Action::Break,
+                            // in ↓ make sure a variable is stored of what to do when you've been woken up.
+                            // else, send sleep command 'till schedulers.iter().min()
+                            false => Action::Wait(self.queue_sleep()),
+                        },
+                    },
                 }
             }
         }
@@ -292,7 +290,6 @@ impl State {
 
     fn get_transition_output(&mut self) -> Option<Strength> {
         if self.transition.is_some() {
-            println!("Now: {:?}, last: {:?}", Instant::now(), &self.last_instance);
             let delta_time = self.get_delta_time();
             // unwrap() is ok, since transition.is_some()
             let transition = self.transition.as_mut().unwrap();
@@ -325,7 +322,7 @@ impl State {
         };
         match next {
             Some((dur, cmd)) => {
-                self.wake_up = Some(cmd);
+                self.wake_up = Some((Instant::now() + dur, cmd));
                 SleepTime::Duration(dur)
             }
             None => SleepTime::Forever,
@@ -336,6 +333,15 @@ impl State {
             Some(s) => Action::Set(s),
             // get_sleep
             None => Action::Wait(self.queue_sleep()),
+        }
+    }
+    fn wake(&mut self) -> Option<Command> {
+        match self.wake_up.as_ref() {
+            Some((when, _)) => match when.checked_duration_since(Instant::now()) {
+                Some(_) => None,
+                None => Some(self.wake_up.take().unwrap().1),
+            },
+            None => None,
         }
     }
 }
