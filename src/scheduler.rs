@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::{Action, Command, Duration, Instant, Strength, Transition, TransitionInterpolation};
 use chrono::prelude::*;
 
@@ -5,13 +7,14 @@ pub enum Keep {
     Keep,
     Remove,
 }
-pub trait Scheduler {
+pub trait Scheduler: Debug + Send {
     fn add(&mut self) -> Keep {
         Keep::Remove
     }
     fn get_next(&self) -> Option<(Duration, Command)>;
 }
 
+#[derive(Debug, PartialEq)]
 pub struct WeekScheduler {
     pub mon: Option<NaiveTime>,
     pub tue: Option<NaiveTime>,
@@ -152,6 +155,7 @@ impl TransitionState {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum SleepTime {
     Duration(Duration),
     Forever,
@@ -183,6 +187,7 @@ impl State {
     }
 
     pub fn process(&mut self, command: Option<Command>) -> Action {
+        println!("Processing {:?}", command);
         match command {
             Some(command) => match command {
                 Command::Finish => {
@@ -211,6 +216,18 @@ impl State {
                         // get_sleep
                         None => Action::Wait(self.queue_sleep()),
                     }
+                }
+                Command::ChangeDayTimerTransition(new_transition) => {
+                    self.day_schedule.transition = new_transition;
+                    self.get_next()
+                }
+                Command::AddScheduler(scheduler) => {
+                    self.schedulers.push(scheduler);
+                    self.get_next()
+                }
+                Command::ClearAllSchedulers => {
+                    self.schedulers.clear();
+                    self.get_next()
                 }
                 Command::SetTransition(transition) => {
                     self.transition = Some(TransitionState::new(transition));
@@ -280,6 +297,13 @@ impl State {
                 SleepTime::Duration(dur)
             }
             None => SleepTime::Forever,
+        }
+    }
+    fn get_next(&mut self) -> Action {
+        match self.get_transition_output() {
+            Some(s) => Action::Set(s),
+            // get_sleep
+            None => Action::Wait(self.queue_sleep()),
         }
     }
 }

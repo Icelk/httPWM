@@ -38,13 +38,17 @@ pub struct Transition {
     pub interpolation: TransitionInterpolation,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug)]
 pub enum Command {
     Set(Strength),
     SetTransition(Transition),
     ChangeDayTimer(Weekday, Option<NaiveTime>),
+    ChangeDayTimerTransition(Transition),
+    AddScheduler(Box<dyn Scheduler>),
+    ClearAllSchedulers,
     Finish,
 }
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Action {
     /// Thread sleep this amount and call me again
     Wait(scheduler::SleepTime),
@@ -100,11 +104,15 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
             let mut state = scheduler::State::new(scheduler);
             loop {
                 let action = state.process(receiver.try_recv().ok());
+                println!("got action: {:?}", action);
                 match action {
-                    Action::Wait(sleep) => match sleep {
-                        scheduler::SleepTime::Duration(dur) => thread::sleep(dur),
-                        scheduler::SleepTime::Forever => thread::park(),
-                    },
+                    Action::Wait(sleep) => {
+                        println!("got sleep {:?}", &sleep);
+                        match sleep {
+                            scheduler::SleepTime::Duration(dur) => thread::sleep(dur),
+                            scheduler::SleepTime::Forever => thread::park(),
+                        }
+                    }
                     Action::Set(s) => output.set(s),
                     Action::Break => break,
                 }
@@ -123,6 +131,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         self.channel
             .send(command)
             .expect("failed to send message on channel");
+        // thread::sleep(Duration::from_millis(10));
         self.handle.thread().unpark();
     }
 
