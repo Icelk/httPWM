@@ -192,7 +192,6 @@ impl State {
     }
 
     pub fn process(&mut self, command: Option<Command>) -> Action {
-        println!("got command {:?}", command);
         match command {
             Some(command) => match command {
                 Command::Finish => {

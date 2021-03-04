@@ -3,12 +3,19 @@ use std::{thread::sleep, time::Duration};
 
 fn main() {
     #[cfg(not(feature = "test"))]
-    // let pwm = rppal::pwm::Pwm::new(rppal::pwm::Channel::Pwm0).expect("failed to get PWM");
-    let pwm = rppal::gpio::Gpio::new()
-        .expect("failed to get GPIO")
-        .get(19)
-        .expect("failed to get pin")
-        .into_output();
+    let pwm = {
+        let pwm = rppal::pwm::Pwm::new(rppal::pwm::Channel::Pwm0).expect("failed to get PWM");
+        pwm.enable().expect("failed to enable pwm");
+        // pwm.set_polarity(rppal::pwm::Polarity::Normal)
+        // .expect("failed to set polarity");
+        // println!("Pin is enabled? {}", pwm.is_enabled().unwrap());
+        pwm
+        // rppal::gpio::Gpio::new()
+        //     .expect("failed to get GPIO")
+        //     .get(19)
+        //     .expect("failed to get pin")
+        //     .into_output()
+    };
     let in_three_minutes = chrono::Local::now().time() + chrono::Duration::minutes(3);
     let transition = Transition {
         from: Strength::new(0.0),
