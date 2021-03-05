@@ -105,20 +105,41 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         (utility::ContentType::Html, Cached::Dynamic)
     });
     let controller = ctl();
-    bindings.bind_page("/set-transition", move |buffer, req, cache| {
-        let command = serde_json::from_slice(req.body())
-            .ok()
-            .and_then(|set_transition: SetTransition| set_transition.to_command());
+    bindings.bind_page("/transition", move |buffer, req, cache| {
+        let queries = req.uri().query().map(|q| parse::format_query(q));
+        let action = queries.as_ref().and_then(|q| q.get("action")).map(|a| *a);
 
-        match command {
-            Some(command) => {
-                println!("Applying transition.");
-                controller.lock().unwrap().send(command)
-            }
+        let transition = serde_json::from_slice(req.body())
+            .ok()
+            .and_then(|set_transition: SetTransition| set_transition.to_transition());
+        let transition = match transition {
+            Some(command) => command,
             None => {
+                utility::write_error(buffer, 400, cache);
+                return (utility::ContentType::Html, Cached::Dynamic);
+            }
+        };
+
+        match action {
+            Some("set") => {
+                println!("Setting default transition.");
+                controller
+                    .lock()
+                    .unwrap()
+                    .send(Command::ChangeDayTimerTransition(transition));
+            }
+            Some("preview") => {
+                println!("Applying transition.");
+                controller
+                    .lock()
+                    .unwrap()
+                    .send(Command::SetTransition(transition));
+            }
+            _ => {
                 utility::write_error(buffer, 400, cache);
             }
         }
+
         (utility::ContentType::Html, Cached::Dynamic)
     });
 
@@ -168,7 +189,7 @@ struct SetTransition {
     extras: Vec<String>,
 }
 impl SetTransition {
-    pub fn to_command(self) -> Option<Command> {
+    pub fn to_transition(self) -> Option<Transition> {
         let from = Strength::new_clamped(self.from);
         let to = Strength::new_clamped(self.to);
         let time = Duration::from_secs_f64(self.time);
@@ -186,11 +207,11 @@ impl SetTransition {
             },
             _ => return None,
         };
-        Some(Command::SetTransition(Transition {
+        Some(Transition {
             from,
             to,
             time,
             interpolation,
-        }))
+        })
     }
 }

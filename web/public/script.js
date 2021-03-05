@@ -42,9 +42,9 @@ function getAndSendDayTime() {
     }
 
 }
-function getAndSetTransition() {
+function getAndSetTransition(action) {
     if (time.value !== "" && interpolation.value !== null) {
-        fetch("/set-transition", {
+        fetch(`/transition?action=${action}`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
