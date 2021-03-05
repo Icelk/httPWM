@@ -30,10 +30,13 @@ impl Strength {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum TransitionInterpolation {
     Linear,
     Sine,
+    /// Works same as [`TransitionInterpolation::Linear`], except it fades back to [`Transition::from`] value
+    /// after reaching [`Transition::to`], for [`Transition::time`] * the `f64` supplied.
+    LinearToAndBack(f64),
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]

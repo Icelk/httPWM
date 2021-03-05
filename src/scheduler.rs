@@ -113,6 +113,21 @@ impl Scheduler for WeekScheduler {
     }
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
+pub enum TransitionStateOut {
+    Ongoing(Strength),
+    Finished(Strength),
+}
+impl TransitionStateOut {
+    pub fn new(strength: f64, progress: f64, finish: f64) -> Self {
+        if progress >= finish {
+            Self::Finished(Strength::new_clamped(strength))
+        } else {
+            Self::Ongoing(Strength::new(strength))
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct TransitionState {
     transition: Transition,
@@ -126,11 +141,11 @@ impl TransitionState {
         }
     }
 
-    pub fn process(&mut self, delta_time: Duration) -> Strength {
+    pub fn process(&mut self, delta_time: Duration) -> TransitionStateOut {
         match self.transition.interpolation {
             TransitionInterpolation::Linear => {
                 self.progress += delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
-                Strength::new_clamped(self.progress)
+                TransitionStateOut::new(self.progress, self.progress, 1.0)
             }
             TransitionInterpolation::Sine => {
                 const HALF_PI: f64 = core::f64::consts::PI / 2.0;
@@ -138,10 +153,20 @@ impl TransitionState {
                 self.progress += advanced;
                 let strength =
                     ((self.progress * core::f64::consts::PI - HALF_PI).sin() + 1.0) / 2.0;
-                Strength::new_clamped(strength)
+                TransitionStateOut::new(strength, self.progress, 1.0)
             }
+
+            TransitionInterpolation::LinearToAndBack(multiplier) => {
+                self.progress += delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
+                let strength = if self.progress > 1.0 {
+                    1.0 - ((self.progress - 1.0) / multiplier)
+                } else {
+                    self.progress
+                };
+                TransitionStateOut::new(strength, self.progress, multiplier + 1.0)
         }
     }
+}
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -283,14 +308,12 @@ impl State {
             let delta_time = self.get_delta_time();
             // unwrap() is ok, since transition.is_some()
             let transition = self.transition.as_mut().unwrap();
-            let strength = transition.process(delta_time);
-            if transition.progress > 1.0 {
-                let final_strength = Strength::clone(&transition.transition.to);
+            match transition.process(delta_time) {
+                TransitionStateOut::Finished(s) => {
                 self.transition = None;
-                self.off = final_strength.is_off();
-                Some(final_strength)
-            } else {
-                Some(strength)
+                    Some(s)
+                }
+                TransitionStateOut::Ongoing(s) => Some(s),
             }
         } else {
             None
