@@ -148,7 +148,11 @@ impl SetDay {
     pub fn to_command(self) -> Option<Command> {
         let day: chrono::Weekday = self.day.parse().ok()?;
         let time = match self.time {
-            Some(time) => Some(chrono::NaiveTime::parse_from_str(time.as_str(), "%H:%M:%S").ok()?),
+            Some(time) => Some(
+                chrono::NaiveTime::parse_from_str(time.as_str(), "%H:%M:%S")
+                    .or_else(|_| chrono::NaiveTime::parse_from_str(time.as_str(), "%H:%M"))
+                    .ok()?,
+            ),
             None => None,
         };
         Some(Command::ChangeDayTimer(day, time))
