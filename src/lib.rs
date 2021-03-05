@@ -82,7 +82,7 @@ impl VariableOut for Pwm {
         self.set_period(Duration::from_micros(1000)).unwrap();
     }
     fn enable(&mut self) {
-        println!("Disabling software PWM.");
+        println!("Enabling hardware PWM.");
         Pwm::enable(self).expect("failed to enable hardware PWM");
     }
     fn disable(&mut self) {
