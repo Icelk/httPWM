@@ -214,14 +214,14 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         }
     }
 
-    pub fn send(&mut self, command: Command) {
+    pub fn send(&self, command: Command) {
         self.channel
             .send(command)
             .expect("failed to send message on channel");
     }
 
     /// Will wait on any transitions to conclude and then give back the underlying object
-    pub fn finish(mut self) -> T {
+    pub fn finish(self) -> T {
         self.send(Command::Finish);
         self.handle.join().expect("child thread paniced")
     }
