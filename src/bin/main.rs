@@ -102,6 +102,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         let command = serde_json::from_slice(req.body())
             .ok()
             .and_then(|set_transition: SetTransition| set_transition.to_command());
+
         match command {
             Some(command) => {
                 println!("Applying transition.");

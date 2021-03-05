@@ -44,7 +44,7 @@ function getAndSetTransition() {
                 'content-type': 'application/json',
             },
             redirect: 'error',
-            body: JSON.stringify({ from: from.value, to: to.value, time: time.value, interpolation: interpolation.value, extras: [interpolationExtras.value] })
+            body: JSON.stringify({ from: Number(from.value), to: Number(to.value), time: Number(time.value), interpolation: interpolation.value, extras: [interpolationExtras.value] })
         })
     }
 }
