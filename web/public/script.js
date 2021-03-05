@@ -56,9 +56,6 @@ function getAndSetTransition() {
 }
 function checkTransitionExtras() {
     interpolationExtras.style.display = (interpolation.value.endsWith("-extra")) ? "initial" : "none";
-    if (interpolation.value === "linear-extra") {
-        interpolationExtras.placeholder = "Fade out duration, multiplier of 'time'";
-    }
 }
 function checkDailySchedulerOption() {
     dayTime.style.display = (dayOption.value === "some") ? "initial" : "none";

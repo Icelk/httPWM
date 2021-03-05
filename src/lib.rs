@@ -40,6 +40,8 @@ pub enum TransitionInterpolation {
     /// Works same as [`TransitionInterpolation::Linear`], except it fades back to [`Transition::from`] value
     /// after reaching [`Transition::to`], for [`Transition::time`] * the `f64` supplied.
     LinearToAndBack(f64),
+    /// Same as above, but with sine interpolation
+    SineToAndBack(f64),
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
@@ -185,7 +187,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 let action = state.process(command);
                 match action {
                     Action::Wait(sleep) => {
-                        if enabled == Some(0.0) {
+                        if enabled.map(|value| value < 0.01).unwrap_or(false) {
                             output.disable();
                             enabled = None;
                         }

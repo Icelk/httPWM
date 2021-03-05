@@ -30,8 +30,10 @@
         <option value="linear">Linear</option>
         <option value="sine">Sine</option>
         <option value="linear-extra" selected>Linear with fade to start again</option>
+        <option value="sine-extra">Sine with fade to start again</option>
     </select>
-    <input style="width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras" value="0.5">
+    <input style="width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras" value="0.5"
+        placeholder="Fade out duration, multiplier of 'time'">
     <button onclick="getAndSetTransition()">Preview now</button>
     <button onclick="getAndSetDefaultTransition()">Set as daily default</button>
 

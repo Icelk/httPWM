@@ -180,6 +180,10 @@ impl SetTransition {
                 Ok(multiplier) => TransitionInterpolation::LinearToAndBack(multiplier),
                 Err(_) => return None,
             },
+            "sine-extra" if self.extras.len() == 1 => match self.extras[0].parse() {
+                Ok(multiplier) => TransitionInterpolation::SineToAndBack(multiplier),
+                Err(_) => return None,
+            },
             _ => return None,
         };
         Some(Command::SetTransition(Transition {

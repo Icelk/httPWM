@@ -169,46 +169,55 @@ impl TransitionState {
         }
     }
 
-    pub fn process(&mut self, delta_time: Duration) -> TransitionStateOut {
+    pub fn process(&mut self, delta_time: &Duration) -> TransitionStateOut {
+        let delta_progress = self.calculate_delta_progress(delta_time);
+        const HALF_PI: f64 = core::f64::consts::PI / 2.0;
+        const PI: f64 = core::f64::consts::PI;
+
         match self.transition.interpolation {
             TransitionInterpolation::Linear => {
-                self.progress += delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
-                TransitionStateOut::remap_and_check_finish(
-                    &self.transition,
-                    self.progress,
-                    self.progress,
-                    1.0,
-                )
+                self.standard_interpolation(delta_progress, delta_progress)
             }
             TransitionInterpolation::Sine => {
-                const HALF_PI: f64 = core::f64::consts::PI / 2.0;
-                let advanced = delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
-                self.progress += advanced;
-                let strength =
-                    ((self.progress * core::f64::consts::PI - HALF_PI).sin() + 1.0) / 2.0;
-                TransitionStateOut::remap_and_check_finish(
-                    &self.transition,
-                    strength,
-                    self.progress,
-                    1.0,
-                )
+                let strength = ((self.progress * PI - HALF_PI).sin() + 1.0) / 2.0;
+                self.standard_interpolation(strength, delta_progress)
             }
 
             TransitionInterpolation::LinearToAndBack(multiplier) => {
-                self.progress += delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
-                let strength = if self.progress > 1.0 {
-                    1.0 - ((self.progress - 1.0) / multiplier)
-                } else {
-                    self.progress
-                };
-                TransitionStateOut::remap_and_check_finish(
-                    &self.transition,
-                    strength,
-                    self.progress,
-                    multiplier + 1.0,
-                )
+                self.and_back_interpolation(|zero_to_one| zero_to_one, delta_progress, multiplier)
             }
+            TransitionInterpolation::SineToAndBack(multiplier) => self.and_back_interpolation(
+                |zero_to_one| ((zero_to_one * PI - HALF_PI).sin() + 1.0) / 2.0,
+                delta_progress,
+                multiplier,
+            ),
         }
+    }
+    fn calculate_delta_progress(&self, delta_time: &Duration) -> f64 {
+        delta_time.as_secs_f64() / self.transition.time.as_secs_f64()
+    }
+    fn standard_interpolation(&mut self, strength: f64, delta_progress: f64) -> TransitionStateOut {
+        self.progress += delta_progress;
+        TransitionStateOut::remap_and_check_finish(&self.transition, strength, self.progress, 1.0)
+    }
+    fn and_back_interpolation<F: Fn(f64) -> f64>(
+        &mut self,
+        function: F,
+        delta_progress: f64,
+        multiplier: f64,
+    ) -> TransitionStateOut {
+        self.progress += delta_progress;
+        let strength = if self.progress > 1.0 {
+            function(1.0 - ((self.progress - 1.0) / multiplier))
+        } else {
+            function(self.progress)
+        };
+        TransitionStateOut::remap_and_check_finish(
+            &self.transition,
+            strength,
+            self.progress,
+            multiplier + 1.0,
+        )
     }
 }
 
@@ -341,7 +350,7 @@ impl State {
             let delta_time = self.get_delta_time();
             // unwrap() is ok, since transition.is_some()
             let transition = self.transition.as_mut().unwrap();
-            match transition.process(delta_time) {
+            match transition.process(&delta_time) {
                 TransitionStateOut::Finished(s) => {
                     self.transition = None;
                     Some(s)
