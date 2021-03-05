@@ -3,7 +3,7 @@ Description=HTTP light service
 
 [Service]
 Type=simple
-ExecStart=sh -c "cd ~/pwm_dev ; ~/.cargo/bin/pwm_http"
+ExecStart=sh -c "sleep 10 ; cd ~/pwm_dev ; ~/.cargo/bin/pwm_http"
 
 [Install]
 WantedBy=default.target
