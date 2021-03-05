@@ -17,6 +17,9 @@ fn main() {
     )
     .expect("failed to get PWM");
 
+    #[cfg(feature = "test")]
+    let pwm = PrintOut;
+
     // let time = chrono::Local::now().time() + chrono::Duration::seconds(10);
     let time = chrono::NaiveTime::from_hms(08, 47, 00);
     // let time = chrono::Local::now().time() + chrono::Duration::seconds(80);
@@ -35,9 +38,6 @@ fn main() {
     };
 
     let scheduler = scheduler::WeekScheduler::same(time, day_transition);
-    #[cfg(feature = "test")]
-    let controller = Controller::new(PrintOut, scheduler);
-    #[cfg(not(feature = "test"))]
     let controller = Controller::new(pwm, scheduler);
 
     let controller = Arc::new(Mutex::new(controller));
