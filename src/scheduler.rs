@@ -119,12 +119,36 @@ pub enum TransitionStateOut {
     Finished(Strength),
 }
 impl TransitionStateOut {
-    pub fn new(strength: f64, progress: f64, finish: f64) -> Self {
+    pub fn remap_and_check_finish(
+        transition: &Transition,
+        strength: f64,
+        progress: f64,
+        finish: f64,
+    ) -> Self {
+        let remapped = Self::remap(strength, transition.from.0, transition.to.0);
         if progress >= finish {
-            Self::Finished(Strength::new_clamped(strength))
+            Self::Finished(Strength::new_clamped(remapped))
         } else {
-            Self::Ongoing(Strength::new(strength))
+            Self::Ongoing(Strength::new(remapped))
         }
+    }
+    fn remap(zero_to_one: f64, zero: f64, one: f64) -> f64 {
+        // 0, 0, 1 => 0
+        // 0.25, 0, 1 => 0.25
+        // 1, 0, 1 => 1
+        // 0, 2, 0 => 2
+        // 0.25, 2, 0 => 1.5
+        // 1, 2, 0 => 0
+        // range = one-zero
+        // add zero?
+        // 0 * (1-0) + 0 = 0
+        // 0.25 * (1-0) + 0 = 0.25
+        // 1 * (1-0) + 0 = 1
+        // 0 * (0-2) + 2 = 2
+        // 0.25 * (0-2) + 2 = 1.5
+        // 1 * (0-2) + 2 = 0
+        // ↑ f64 = zero_to_one * (one-zero) + zero
+        zero_to_one * (one - zero) + zero
     }
 }
 
@@ -145,7 +169,12 @@ impl TransitionState {
         match self.transition.interpolation {
             TransitionInterpolation::Linear => {
                 self.progress += delta_time.as_secs_f64() / self.transition.time.as_secs_f64();
-                TransitionStateOut::new(self.progress, self.progress, 1.0)
+                TransitionStateOut::remap_and_check_finish(
+                    &self.transition,
+                    self.progress,
+                    self.progress,
+                    1.0,
+                )
             }
             TransitionInterpolation::Sine => {
                 const HALF_PI: f64 = core::f64::consts::PI / 2.0;
@@ -153,7 +182,12 @@ impl TransitionState {
                 self.progress += advanced;
                 let strength =
                     ((self.progress * core::f64::consts::PI - HALF_PI).sin() + 1.0) / 2.0;
-                TransitionStateOut::new(strength, self.progress, 1.0)
+                TransitionStateOut::remap_and_check_finish(
+                    &self.transition,
+                    strength,
+                    self.progress,
+                    1.0,
+                )
             }
 
             TransitionInterpolation::LinearToAndBack(multiplier) => {
@@ -163,7 +197,12 @@ impl TransitionState {
                 } else {
                     self.progress
                 };
-                TransitionStateOut::new(strength, self.progress, multiplier + 1.0)
+                TransitionStateOut::remap_and_check_finish(
+                    &self.transition,
+                    strength,
+                    self.progress,
+                    multiplier + 1.0,
+                )
             }
         }
     }
