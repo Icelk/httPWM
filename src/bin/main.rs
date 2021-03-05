@@ -40,12 +40,9 @@ fn main() {
     let scheduler = scheduler::WeekScheduler::same(time, day_transition);
     let controller = Controller::new(pwm, scheduler);
 
-    let controller = Arc::new(Mutex::new(controller));
+    controller.send(Command::SetTransition(startup_transition));
 
-    controller
-        .lock()
-        .unwrap()
-        .send(Command::SetTransition(startup_transition));
+    let controller = Arc::new(Mutex::new(controller));
 
     create_server(controller).run();
 }
