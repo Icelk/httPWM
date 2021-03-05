@@ -223,7 +223,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
             }
             _ => self
                 .channel
-            .send(command)
+                .send(command)
                 .expect("failed to send message on channel"),
         }
     }
