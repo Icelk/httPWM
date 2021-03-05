@@ -145,13 +145,14 @@ enum Sleeping {
 /// The handler's job is to handle [`Scheduler`]s and transitions.
 ///
 /// This is done by spawning a thread and running all code on it.
+#[derive(Debug)]
 pub struct Controller<T: VariableOut + Send + 'static> {
-    channel: mpsc::Sender<Command>,
+    channel: mpsc::SyncSender<Command>,
     handle: thread::JoinHandle<T>,
 }
 impl<T: VariableOut + Send + 'static> Controller<T> {
     pub fn new(mut output: T, scheduler: scheduler::WeekScheduler) -> Self {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(2);
         // make channel
         let handle = thread::spawn(move || {
             let receiver = receiver;
@@ -216,9 +217,15 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
     }
 
     pub fn send(&self, command: Command) {
-        self.channel
+        match &command {
+            Command::Set(_) => {
+                let _ = self.channel.try_send(command);
+            }
+            _ => self
+                .channel
             .send(command)
-            .expect("failed to send message on channel");
+                .expect("failed to send message on channel"),
+        }
     }
 
     /// Will wait on any transitions to conclude and then give back the underlying object
