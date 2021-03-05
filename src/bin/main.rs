@@ -2,7 +2,7 @@ use kvarn::prelude::*;
 use pwm_dev::*;
 use serde::Deserialize;
 use std::{
-    sync::{Arc, Mutex},
+    sync::{atomic, Arc, Mutex},
     time::Duration,
 };
 
@@ -58,12 +58,18 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         (utility::ContentType::PlainText, Cached::Dynamic)
     });
     let controller = ctl();
+    let set_strength = Arc::new(atomic::AtomicU8::new(0));
+    let strength = Arc::clone(&set_strength);
     bindings.bind_page("/set-strength", move |buffer, req, cache| {
         let query = req.uri().query().map(|s| parse::format_query(s));
         let value = query.as_ref().and_then(|q| q.get("strength"));
 
         match value.and_then(|v| v.parse().ok()) {
             Some(f) => {
+                strength.store(
+                    clamp_map_from_0_to_1(f, 0.0, 255.0) as u8,
+                    atomic::Ordering::Release,
+                );
                 controller
                     .lock()
                     .unwrap()
@@ -75,6 +81,10 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
             }
         }
         (utility::ContentType::Html, Cached::Dynamic)
+    });
+    bindings.bind_page("/get-strength", move |buffer, _, _| {
+        buffer.extend(format!("{}", set_strength.load(atomic::Ordering::Acquire)).as_bytes());
+        (utility::ContentType::PlainText, Cached::Dynamic)
     });
     let controller = ctl();
     bindings.bind_page("/set-day-time", move |buffer, req, cache| {
@@ -116,6 +126,16 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     let ports = vec![(8080, ConnectionSecurity::http1(), hosts)];
 
     Config::new(ports)
+}
+
+fn clamp_map_from_0_to_1(value: f64, min: f64, max: f64) -> f64 {
+    if value < min {
+        min
+    } else if value > max {
+        max
+    } else {
+        value * max
+    }
 }
 
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
