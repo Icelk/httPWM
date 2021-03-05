@@ -70,3 +70,5 @@ async function load() {
 }
 
 load();
+checkTransitionExtras();
+checkDailySchedulerOption();

@@ -29,9 +29,9 @@
     <select name="Transition Interpolation" id="interpolation" onchange="checkTransitionExtras()">
         <option value="linear">Linear</option>
         <option value="sine">Sine</option>
-        <option value="linear-extra">Linear with fade to start again</option>
+        <option value="linear-extra" selected>Linear with fade to start again</option>
     </select>
-    <input style="display: none; width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras">
+    <input style="width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras" value="0.5">
     <button onclick="getAndSetTransition()">Preview now</button>
     <button onclick="getAndSetDefaultTransition()">Set as daily default</button>
 
@@ -51,9 +51,9 @@
     </select>
     <select name="Option Time" id="optionTime" onchange="checkDailySchedulerOption()">
         <option value="none">No scheduled transition</option>
-        <option value="some">Transition at...</option>
+        <option value="some" selected>Transition at...</option>
     </select>
-    <input type="text" style="width: 6em; display: none;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
+    <input type="text" style="width: 6em;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
     <button onclick="getAndSendDayTime()">Change!</button>
 </body>
 
