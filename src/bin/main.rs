@@ -20,14 +20,21 @@ fn main() {
     // let time = chrono::Local::now().time() + chrono::Duration::seconds(10);
     let time = chrono::NaiveTime::from_hms(08, 47, 00);
     // let time = chrono::Local::now().time() + chrono::Duration::seconds(80);
-    let transition = Transition {
+    let day_transition = Transition {
         from: Strength::new(0.0),
         to: Strength::new(1.0),
         time: Duration::from_secs(30),
         // time: Duration::from_secs(60),
         interpolation: TransitionInterpolation::LinearToAndBack(0.5),
     };
-    let scheduler = scheduler::WeekScheduler::same(time, transition.clone());
+    let startup_transition = Transition {
+        from: Strength::new(0.0),
+        to: Strength::new(1.0),
+        time: Duration::from_millis(1000),
+        interpolation: TransitionInterpolation::LinearToAndBack(0.5),
+    };
+
+    let scheduler = scheduler::WeekScheduler::same(time, day_transition);
     #[cfg(feature = "test")]
     let controller = Controller::new(PrintOut, scheduler);
     #[cfg(not(feature = "test"))]
@@ -35,9 +42,12 @@ fn main() {
 
     let controller = Arc::new(Mutex::new(controller));
 
-    create_server(controller).run();
+    controller
+        .lock()
+        .unwrap()
+        .send(Command::SetTransition(startup_transition));
 
-    std::thread::park();
+    create_server(controller).run();
 }
 
 fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -> kvarn::Config {
