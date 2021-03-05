@@ -1,5 +1,7 @@
 let toSend = null;
 
+let mainStrength = document.getElementById("strength");
+
 let day = document.getElementById("weekday");
 let dayTime = document.getElementById("dayTime");
 
@@ -58,3 +60,10 @@ function checkTransitionExtras() {
         interpolationExtras.style.display = "none";
     }
 }
+
+async function load() {
+    let response = await (await fetch("/get-strength")).text();
+    mainStrength.value = Number(response) / 255;
+}
+
+load();

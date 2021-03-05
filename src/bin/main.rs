@@ -83,7 +83,8 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         (utility::ContentType::Html, Cached::Dynamic)
     });
     bindings.bind_page("/get-strength", move |buffer, _, _| {
-        buffer.extend(format!("{}", set_strength.load(atomic::Ordering::Acquire)).as_bytes());
+        let strength = format!("{}", set_strength.load(atomic::Ordering::Acquire));
+        buffer.extend(strength.as_bytes());
         (utility::ContentType::PlainText, Cached::Dynamic)
     });
     let controller = ctl();
