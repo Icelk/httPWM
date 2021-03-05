@@ -49,8 +49,8 @@ impl WeekScheduler {
         Self::same_with_day(Local::today().weekday(), Some(time), transition)
     }
 
-    pub fn get_next(&self) -> &Option<NaiveTime> {
-        let day = self.current;
+    pub fn get_next_from_day(&self, day: Weekday) -> &Option<NaiveTime> {
+        let day = day.pred();
         for _ in 0..7 {
             let time = self.get(day.succ());
             if time.is_some() {
@@ -89,10 +89,14 @@ impl Scheduler for WeekScheduler {
     }
     fn get_next(&self) -> Option<(Duration, Command)> {
         let now = Local::now();
-        let next = *self.get_next();
+        let next = *self.get_next_from_day(now.weekday());
         match next {
             Some(next) => {
-                let next = if now.time() < next {
+                let next = if now.time()
+                    < next
+                        - chrono::Duration::from_std(self.transition.time)
+                            .unwrap_or(chrono::Duration::zero())
+                {
                     now.date().and_time(next).unwrap()
                 } else {
                     now.date().succ().and_time(next).unwrap()
@@ -264,12 +268,7 @@ impl State {
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
                     *self.day_schedule.get_mut(day) = time;
-                    // get_output
-                    match self.get_transition_output() {
-                        Some(s) => Action::Set(s),
-                        // get_sleep
-                        None => Action::Wait(self.queue_sleep()),
-                    }
+                    self.get_next()
                 }
                 Command::ChangeDayTimerTransition(new_transition) => {
                     self.day_schedule.transition = new_transition;
