@@ -3,7 +3,6 @@ use pwm_dev::*;
 use serde::Deserialize;
 use std::{
     sync::{Arc, Mutex},
-    thread::sleep,
     time::Duration,
 };
 
@@ -33,16 +32,6 @@ fn main() {
     let controller = Controller::new(PrintOut, scheduler);
     #[cfg(not(feature = "test"))]
     let controller = Controller::new(pwm, scheduler);
-
-    controller.send(Command::Set(Strength::new(0.75)));
-    sleep(Duration::from_secs(2));
-
-    println!("Sending transition!");
-    controller.send(Command::SetTransition(transition));
-    sleep(Duration::from_secs(1));
-
-    println!("Sending set command");
-    controller.send(Command::Set(Strength::new(0.0)));
 
     let controller = Arc::new(Mutex::new(controller));
 
