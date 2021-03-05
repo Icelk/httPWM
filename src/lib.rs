@@ -183,7 +183,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 let action = state.process(command);
                 match action {
                     Action::Wait(sleep) => {
-                        if enabled.unwrap_or(0.0) == 0.0 {
+                        if enabled == Some(0.0) {
                             output.disable();
                             enabled = None;
                         }
