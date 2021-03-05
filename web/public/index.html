@@ -9,11 +9,36 @@
 </head>
 
 <body style="text-align: center;">
-    <h2>Set value</h2>
-    <input style="width: 30em;" type="range" name="Wtrength" id="strength" oninput="toSend = this.value" min="0" max="1"
-        value="0.5" step="0.01">
+    <h2>Set current value</h2>
+    <i>Overrides current transition (including ongoing scheduled transitions)</i>
+    <br>
+    <input style="width: 30em;" type="range" name="Strength" id="strength" oninput="toSend = this.value" min="0" max="1"
+        value="0" step="0.01">
+
+    <h2>Transitions</h2>
+    <i>Adjust the settings to your liking and either play it or set it as the default for the daily schedules.
+        The following values are defaults for the daily schedule</i>
+    <br>
+    <input style="width: 30em;" type="range" name="From Strength" id="fromStrength" min="0" max="1" value="0"
+        step="0.01">
+    <br>
+    <input style="width: 30em;" type="range" name="To Strength" id="toStrength" min="0" max="1" value="1" step="0.01">
+    <br>
+    <input type="number" style="width: 6em;" name="Transition Time" id="transitionTime" placeholder="secs" min="0.1"
+        value="30">
+    <select name="Transition Interpolation" id="interpolation" onchange="checkTransitionExtras()">
+        <option value="linear">Linear</option>
+        <option value="sine">Sine</option>
+        <option value="linear-extra">Linear with fade to start again</option>
+    </select>
+    <input style="display: none; width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras">
+    <button onclick="getAndSetTransition()">Preview now</button>
+    <button onclick="getAndSetDefaultTransition()">Set as daily default</button>
 
     <h2>Set scheduler time of day</h2>
+    <i>Sets the scheduled time (if any) to perform set transition (if you haven't changed it, reload this page and press
+        <code>Preview now</code> under <code>Transitions</code> to preview the default one) for a specific day.</i>
+    <br>
     <select name="Weekday" id="weekday">
         <option value="mon">Monday</option>
         <option value="tue">Tuesday</option>
@@ -22,25 +47,14 @@
         <option value="fri">Friday</option>
         <option value="sat">Saturday</option>
         <option value="sun">Sunday</option>
+        <option value="all">All weekdays</option>
     </select>
-    <input type="text" style="width: 6em;" name="Day Time" id="dayTime" placeholder="HH:MM:SS">
+    <select name="Option Time" id="optionTime" onchange="checkDailySchedulerOption()">
+        <option value="none">No scheduled transition</option>
+        <option value="some">Transition at...</option>
+    </select>
+    <input type="text" style="width: 6em; display: none;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
     <button onclick="getAndSendDayTime()">Change!</button>
-
-    <h2>Set transition</h2>
-    <input style="width: 30em;" type="range" name="From Strength" id="fromStrength" min="0" max="1" value="0.5"
-        step="0.01">
-    <br>
-    <input style="width: 30em;" type="range" name="To Strength" id="toStrength" min="0" max="1" value="0.5" step="0.01">
-    <br>
-    <input type="number" style="width: 6em;" name="Transition Time" id="transitionTime" placeholder="secs" min="0.1">
-    <select name="Transition Interpolation" id="interpolation" onchange="checkTransitionExtras()">
-        <option value="linear">Linear</option>
-        <option value="sine">Sine</option>
-        <option value="linear-extra">Linear with fade to start again</option>
-    </select>
-    <input style="display: none; width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras">
-    <button onclick="getAndSetTransition()">Set</button>
-
 </body>
 
 </html>

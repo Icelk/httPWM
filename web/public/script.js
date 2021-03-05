@@ -2,14 +2,15 @@ let toSend = null;
 
 let mainStrength = document.getElementById("strength");
 
-let day = document.getElementById("weekday");
-let dayTime = document.getElementById("dayTime");
-
 let from = document.getElementById("fromStrength");
 let to = document.getElementById("toStrength");
 let time = document.getElementById("transitionTime");
 let interpolation = document.getElementById("interpolation");
 let interpolationExtras = document.getElementById("interpolationExtras");
+
+let day = document.getElementById("weekday");
+let dayTime = document.getElementById("dayTime");
+let dayOption = document.getElementById("optionTime");
 
 window.setInterval(() => {
     if (toSend !== null) {
@@ -34,9 +35,12 @@ async function sendDayTime(day, time) {
     }).await
 }
 function getAndSendDayTime() {
-    if (day.value !== null) {
+    if (dayOption.value === "some") {
         sendDayTime(day.value, dayTime.value);
+    } else {
+        sendDayTime(day.value, null);
     }
+
 }
 function getAndSetTransition() {
     if (time.value !== "" && interpolation.value !== null) {
@@ -51,14 +55,13 @@ function getAndSetTransition() {
     }
 }
 function checkTransitionExtras() {
-    if (interpolation.value.endsWith("-extra")) {
-        interpolationExtras.style.display = "initial";
-        if (interpolation.value.startsWith("linear")) {
-            interpolationExtras.placeholder = "Fade out duration, multiplier of 'time'";
-        }
-    } else {
-        interpolationExtras.style.display = "none";
+    interpolationExtras.style.display = (interpolation.value.endsWith("-extra")) ? "initial" : "none";
+    if (interpolation.value === "linear-extra") {
+        interpolationExtras.placeholder = "Fade out duration, multiplier of 'time'";
     }
+}
+function checkDailySchedulerOption() {
+    dayTime.style.display = (dayOption.value === "some") ? "initial" : "none";
 }
 
 async function load() {
