@@ -164,9 +164,9 @@ impl TransitionState {
                     self.progress
                 };
                 TransitionStateOut::new(strength, self.progress, multiplier + 1.0)
+            }
         }
     }
-}
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -185,8 +185,6 @@ pub struct State {
     transition: Option<TransitionState>,
     last_instance: Instant,
     last_scheduler: Option<usize>,
-    // If the output is 0
-    off: bool,
 }
 impl State {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -198,7 +196,6 @@ impl State {
             transition: None,
             last_instance: Instant::now(),
             last_scheduler: None,
-            off: false,
         }
     }
     pub fn add_scheduler(&mut self, scheduler: Box<dyn Scheduler>) {
@@ -216,25 +213,23 @@ impl State {
                         None => Action::Break,
                         // else return get_output
                         // Ok, because a transition exists, which will yield a value
-                        Some(s) => Action::Set(s, self.process_enable()),
+                        Some(s) => Action::Set(s),
                     }
                 }
                 Command::Set(strength) => {
                     // clear animation
                     self.transition = None;
-                    let off = self.off;
-                    self.off = strength.is_off();
                     // send back set
-                    Action::Set(strength, off)
+                    Action::Set(strength)
                 }
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
                     *self.day_schedule.get_mut(day) = time;
                     // get_output
                     match self.get_transition_output() {
-                        Some(s) => Action::Set(s, self.process_enable()),
+                        Some(s) => Action::Set(s),
                         // get_sleep
-                        None => Action::Wait(self.queue_sleep(), self.off),
+                        None => Action::Wait(self.queue_sleep()),
                     }
                 }
                 Command::ChangeDayTimerTransition(new_transition) => {
@@ -253,7 +248,7 @@ impl State {
                     self.transition = Some(TransitionState::new(transition));
                     self.last_instance = Instant::now();
                     // unwrap() is ok; we've just set transition to be `Some`
-                    Action::Set(self.get_transition_output().unwrap(), self.process_enable())
+                    Action::Set(self.get_transition_output().unwrap())
                 }
             },
             None => {
@@ -282,13 +277,13 @@ impl State {
                     }
                     // check internal transition state; get_output()
                     None => match self.get_transition_output() {
-                        Some(s) => Action::Set(s, self.process_enable()),
+                        Some(s) => Action::Set(s),
                         // check finish flag
                         None => match self.finish {
                             true => Action::Break,
                             // in ↓ make sure a variable is stored of what to do when you've been woken up.
                             // else, send sleep command 'till schedulers.iter().min()
-                            false => Action::Wait(self.queue_sleep(), self.off),
+                            false => Action::Wait(self.queue_sleep()),
                         },
                     },
                 }
@@ -310,7 +305,7 @@ impl State {
             let transition = self.transition.as_mut().unwrap();
             match transition.process(delta_time) {
                 TransitionStateOut::Finished(s) => {
-                self.transition = None;
+                    self.transition = None;
                     Some(s)
                 }
                 TransitionStateOut::Ongoing(s) => Some(s),
@@ -345,9 +340,9 @@ impl State {
     }
     fn get_next(&mut self) -> Action {
         match self.get_transition_output() {
-            Some(s) => Action::Set(s, self.off),
+            Some(s) => Action::Set(s),
             // get_sleep
-            None => Action::Wait(self.queue_sleep(), self.off),
+            None => Action::Wait(self.queue_sleep()),
         }
     }
     fn wake(&mut self) -> Option<Command> {
@@ -358,12 +353,5 @@ impl State {
             },
             None => None,
         }
-    }
-    fn process_enable(&mut self) -> bool {
-        let off = self.off;
-        if off {
-            self.off = false;
-        }
-        off
     }
 }

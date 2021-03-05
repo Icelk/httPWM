@@ -5,7 +5,7 @@ pub use scheduler::Scheduler;
 use std::time::{Duration, Instant};
 use std::{sync::mpsc, thread};
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub struct Strength(f64);
 impl Strength {
     pub fn new(value: f64) -> Self {
@@ -21,6 +21,9 @@ impl Strength {
         } else {
             Self(value)
         }
+    }
+    pub fn off() -> Self {
+        Self(0.0)
     }
     pub fn is_off(&self) -> bool {
         self.0 == 0.0
@@ -60,11 +63,9 @@ pub enum Command {
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Action {
     /// Thread sleep this amount and call me again.
-    /// `bool` will be true if you should turn off the output.
-    Wait(scheduler::SleepTime, bool),
+    Wait(scheduler::SleepTime),
     /// Set the output to this strength.
-    /// If `bool` is true, you must enable the output.
-    Set(Strength, bool),
+    Set(Strength),
     /// Stop execution of loop
     Break,
 }
@@ -155,6 +156,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
             let receiver = receiver;
             let mut state = scheduler::State::new(scheduler);
             let mut sleeping: Sleeping = Sleeping::Wake;
+            let mut enabled = None;
             loop {
                 let command = match receiver.try_recv().ok() {
                     Some(r) => {
@@ -180,9 +182,10 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 };
                 let action = state.process(command);
                 match action {
-                    Action::Wait(sleep, turn_off) => {
-                        if turn_off {
+                    Action::Wait(sleep) => {
+                        if enabled.unwrap_or(0.0) == 0.0 {
                             output.disable();
+                            enabled = None;
                         }
                         match sleep {
                             scheduler::SleepTime::Duration(dur) => {
@@ -191,11 +194,12 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                             scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
                         }
                     }
-                    Action::Set(s, enable) => {
-                        if enable {
+                    Action::Set(s) => {
+                        if enabled.unwrap_or(0.0) == 0.0 {
                             output.enable();
                         }
-                        output.set(s)
+                        output.set(s);
+                        enabled = Some(s.into_inner());
                     }
                     Action::Break => break,
                 }
