@@ -84,6 +84,7 @@ impl VariableOut for Pwm {
         self.set_pulse_width(Duration::from_micros((value.0 * 1000.0).round() as u64))
             .unwrap();
         self.set_period(Duration::from_micros(1000)).unwrap();
+        thread::sleep(Duration::from_millis(10));
     }
     fn enable(&mut self) {
         println!("Enabling hardware PWM.");
