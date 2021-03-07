@@ -49,15 +49,16 @@ impl WeekScheduler {
         Self::same_with_day(Local::today().weekday(), Some(time), transition)
     }
 
-    pub fn get_next_from_day(&self, day: Weekday) -> &Option<NaiveTime> {
-        let day = day.pred();
-        for _ in 0..7 {
-            let time = self.get(day.succ());
+    pub fn get_next_from_day(&self, day: Weekday) -> Option<(&NaiveTime, u8)> {
+        let mut day = day.pred();
+        for passed in 0..7 {
+            day = day.succ();
+            let time = self.get(day);
             if time.is_some() {
-                return time;
+                return time.as_ref().map(|t| (t, passed));
             }
         }
-        &None
+        None
     }
     pub fn get(&self, day: Weekday) -> &Option<NaiveTime> {
         match day {
@@ -89,7 +90,7 @@ impl Scheduler for WeekScheduler {
     }
     fn get_next(&self) -> Option<(Duration, Command)> {
         let now = Local::now();
-        let next = *self.get_next_from_day(now.weekday());
+        let next = self.get_next_from_day(now.weekday()).map(|(t, _)| *t);
         match next {
             Some(next) => {
                 let next = if now.time()
@@ -97,9 +98,14 @@ impl Scheduler for WeekScheduler {
                         - chrono::Duration::from_std(self.transition.time)
                             .unwrap_or(chrono::Duration::zero())
                 {
-                    now.date().and_time(next).unwrap()
+                    now.date().and_time(next).expect("got invalid DateTime")
                 } else {
-                    now.date().succ().and_time(next).unwrap()
+                    let (time, day) = self.get_next_from_day(now.weekday().succ())?;
+                    // Since we get the next day from function
+                    let day = day + 1;
+
+                    now.date().and_time(*time).expect("got invalid DateTime")
+                        + chrono::Duration::days(day as i64)
                 };
                 // The expect here should never happen, we checked above if now is less than next.
                 let next = (next - now)
