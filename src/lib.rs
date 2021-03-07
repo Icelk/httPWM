@@ -193,6 +193,10 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                         }
                         match sleep {
                             scheduler::SleepTime::Duration(dur) => {
+                                match chrono::Duration::from_std(dur) {
+                                    Ok(dur) => println!("Sleeping to {:?}", Local::now() + dur),
+                                    Err(_) => eprintln!("Sleeping to unknown date, failed to convert std::Duration to chrono::Duration when printing"),
+                                }
                                 sleeping = Sleeping::To(Instant::now() + dur)
                             }
                             scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
