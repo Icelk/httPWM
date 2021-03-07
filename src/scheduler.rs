@@ -1,7 +1,10 @@
 use std::fmt::Debug;
 
-use crate::{Action, Command, Duration, Instant, Strength, Transition, TransitionInterpolation};
+use crate::{
+    Action, Command, Duration, Instant, SharedState, Strength, Transition, TransitionInterpolation,
+};
 use chrono::prelude::*;
+use std::sync::{Arc, Mutex};
 
 pub enum Keep {
     Keep,
@@ -15,7 +18,7 @@ pub trait Scheduler: Debug + Send {
     fn get_next(&self) -> Option<(Duration, Command)>;
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct WeekScheduler {
     pub mon: Option<NaiveTime>,
     pub tue: Option<NaiveTime>,
@@ -120,6 +123,11 @@ impl Scheduler for WeekScheduler {
             }
             None => None,
         }
+    }
+}
+impl Default for WeekScheduler {
+    fn default() -> Self {
+        Self::empty(Transition::default())
     }
 }
 
@@ -237,6 +245,7 @@ pub struct State {
     // Data
     day_schedule: WeekScheduler,
     schedulers: Vec<Box<dyn Scheduler>>,
+    shared: Arc<Mutex<SharedState>>,
 
     finish: bool,
     wake_up: Option<(Instant, Command)>,
@@ -245,10 +254,11 @@ pub struct State {
     last_scheduler: Option<usize>,
 }
 impl State {
-    pub fn new(scheduler: WeekScheduler) -> Self {
+    pub fn new(scheduler: WeekScheduler, state: Arc<Mutex<SharedState>>) -> Self {
         Self {
             day_schedule: scheduler,
             schedulers: Vec::new(),
+            shared: state,
             finish: false,
             wake_up: None,
             transition: None,
@@ -277,16 +287,21 @@ impl State {
                 Command::Set(strength) => {
                     // clear animation
                     self.transition = None;
+                    self.shared.lock().unwrap().strength = Strength::clone(&strength);
                     // send back set
                     Action::Set(strength)
                 }
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
                     *self.day_schedule.get_mut(day) = time;
+                    self.shared.lock().unwrap().week_schedule =
+                        WeekScheduler::clone(&self.day_schedule);
                     self.get_next()
                 }
                 Command::ChangeDayTimerTransition(new_transition) => {
                     self.day_schedule.transition = new_transition;
+                    self.shared.lock().unwrap().week_schedule =
+                        WeekScheduler::clone(&self.day_schedule);
                     self.get_next()
                 }
                 Command::AddScheduler(scheduler) => {

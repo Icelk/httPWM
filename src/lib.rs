@@ -3,7 +3,10 @@ use chrono::prelude::*;
 use rppal::{gpio::OutputPin, pwm::Pwm};
 pub use scheduler::Scheduler;
 use std::time::{Duration, Instant};
-use std::{sync::mpsc, thread};
+use std::{
+    sync::{mpsc, Arc, Mutex},
+    thread,
+};
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub struct Strength(f64);
@@ -50,6 +53,16 @@ pub struct Transition {
     pub to: Strength,
     pub time: Duration,
     pub interpolation: TransitionInterpolation,
+}
+impl Default for Transition {
+    fn default() -> Self {
+        Self {
+            from: Strength::new(0.0),
+            to: Strength::new(1.0),
+            time: Duration::from_secs(15 * 60),
+            interpolation: TransitionInterpolation::LinearToAndBack(0.5),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -125,6 +138,20 @@ impl VariableOut for PrintOut {
     }
 }
 
+#[derive(Debug)]
+pub struct SharedState {
+    pub strength: Strength,
+    pub week_schedule: scheduler::WeekScheduler,
+}
+impl SharedState {
+    pub fn new() -> Self {
+        Self {
+            strength: Strength::new(0.0),
+            week_schedule: scheduler::WeekScheduler::default(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum Sleeping {
     Forever,
@@ -151,14 +178,20 @@ enum Sleeping {
 pub struct Controller<T: VariableOut + Send + 'static> {
     channel: mpsc::SyncSender<Command>,
     handle: thread::JoinHandle<T>,
+    shared_state: Arc<Mutex<SharedState>>,
 }
 impl<T: VariableOut + Send + 'static> Controller<T> {
     pub fn new(mut output: T, scheduler: scheduler::WeekScheduler) -> Self {
-        let (sender, receiver) = mpsc::sync_channel(2);
         // make channel
+        let (sender, receiver) = mpsc::sync_channel(2);
+
+        let shared_state = Arc::new(Mutex::new(SharedState::new()));
+
+        let shared = Arc::clone(&shared_state);
+
         let handle = thread::spawn(move || {
             let receiver = receiver;
-            let mut state = scheduler::State::new(scheduler);
+            let mut state = scheduler::State::new(scheduler, shared);
             let mut sleeping: Sleeping = Sleeping::Wake;
             let mut enabled = None;
             loop {
@@ -219,6 +252,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         Self {
             channel: sender,
             handle,
+            shared_state,
         }
     }
 
@@ -238,5 +272,11 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
     pub fn finish(self) -> T {
         self.send(Command::Finish);
         self.handle.join().expect("child thread paniced")
+    }
+
+    /// Gets a reference counted [`SharedState`]
+    /// The value should not be mutated, since it'll be overriden by the other thread.
+    pub fn get_state(&self) -> Arc<Mutex<SharedState>> {
+        Arc::clone(&self.shared_state)
     }
 }
