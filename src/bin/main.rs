@@ -20,14 +20,11 @@ fn main() {
     #[cfg(feature = "test")]
     let pwm = PrintOut;
 
-    // let time = chrono::Local::now().time() + chrono::Duration::seconds(10);
-    let time = chrono::NaiveTime::from_hms(08, 47, 00);
-    // let time = chrono::Local::now().time() + chrono::Duration::seconds(80);
+    let time = chrono::NaiveTime::from_hms(07, 00, 00);
     let day_transition = Transition {
         from: Strength::new(0.0),
         to: Strength::new(1.0),
-        time: Duration::from_secs(30),
-        // time: Duration::from_secs(60),
+        time: Duration::from_secs(15 * 60),
         interpolation: TransitionInterpolation::LinearToAndBack(0.5),
     };
     let startup_transition = Transition {
