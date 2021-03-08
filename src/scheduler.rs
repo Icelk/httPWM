@@ -190,12 +190,12 @@ impl TransitionState {
 
         match self.transition.interpolation {
             TransitionInterpolation::Linear => {
-                self.standard_interpolation(delta_progress, delta_progress)
+                self.standard_interpolation(|progress| progress, delta_progress)
             }
-            TransitionInterpolation::Sine => {
-                let strength = ((self.progress * PI - HALF_PI).sin() + 1.0) / 2.0;
-                self.standard_interpolation(strength, delta_progress)
-            }
+            TransitionInterpolation::Sine => self.standard_interpolation(
+                |progress| ((progress * PI - HALF_PI).sin() + 1.0) / 2.0,
+                delta_progress,
+            ),
 
             TransitionInterpolation::LinearToAndBack(multiplier) => {
                 self.and_back_interpolation(|zero_to_one| zero_to_one, delta_progress, multiplier)
@@ -210,9 +210,18 @@ impl TransitionState {
     fn calculate_delta_progress(&self, delta_time: &Duration) -> f64 {
         delta_time.as_secs_f64() / self.transition.time.as_secs_f64()
     }
-    fn standard_interpolation(&mut self, strength: f64, delta_progress: f64) -> TransitionStateOut {
+    fn standard_interpolation<F: Fn(f64) -> f64>(
+        &mut self,
+        strength: F,
+        delta_progress: f64,
+    ) -> TransitionStateOut {
         self.progress += delta_progress;
-        TransitionStateOut::remap_and_check_finish(&self.transition, strength, self.progress, 1.0)
+        TransitionStateOut::remap_and_check_finish(
+            &self.transition,
+            strength(self.progress),
+            self.progress,
+            1.0,
+        )
     }
     fn and_back_interpolation<F: Fn(f64) -> f64>(
         &mut self,
