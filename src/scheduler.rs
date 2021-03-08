@@ -17,7 +17,13 @@ pub trait Scheduler: Debug + Send {
     /// Main function. It gets the time to the next occurrence of this Scheduler.
     fn get_next(&self) -> Option<(Duration, Command)>;
     /// A description to show the user. Should contain information about what this scheduler wakes up to do.
+    /// Should only be used as a tip for users.
     fn description(&self) -> &str;
+    /// Which type this scheduler is of.
+    /// Should be used as a tip for users.
+    fn kind(&self) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -129,6 +135,10 @@ impl Scheduler for WeekScheduler {
 
     fn description(&self) -> &str {
         "Can schedule once per weekday, repeating every week."
+    }
+
+    fn kind(&self) -> Option<&str> {
+        Some("Weekly cycle")
     }
 }
 impl Default for WeekScheduler {
