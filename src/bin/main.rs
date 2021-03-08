@@ -191,19 +191,7 @@ impl SetTransition {
         let to = Strength::new_clamped(self.to);
         let time = Duration::from_secs_f64(self.time);
 
-        let interpolation = match self.interpolation.as_str() {
-            "linear" => TransitionInterpolation::Linear,
-            "sine" => TransitionInterpolation::Sine,
-            "linear-extra" if self.extras.len() == 1 => match self.extras[0].parse() {
-                Ok(multiplier) => TransitionInterpolation::LinearToAndBack(multiplier),
-                Err(_) => return None,
-            },
-            "sine-extra" if self.extras.len() == 1 => match self.extras[0].parse() {
-                Ok(multiplier) => TransitionInterpolation::SineToAndBack(multiplier),
-                Err(_) => return None,
-            },
-            _ => return None,
-        };
+        let interpolation = TransitionInterpolation::from_str(&self.interpolation, &self.extras)?;
         Some(Transition {
             from,
             to,

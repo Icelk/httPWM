@@ -46,6 +46,37 @@ pub enum TransitionInterpolation {
     /// Same as above, but with sine interpolation
     SineToAndBack(f64),
 }
+impl TransitionInterpolation {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Sine => "sine",
+            Self::LinearToAndBack(_) => "linear-extra",
+            Self::SineToAndBack(_) => "sine-extra",
+        }
+    }
+    pub fn from_str<S: AsRef<str>>(string: &str, extras: &[S]) -> Option<Self> {
+        Some(match string.as_ref() {
+            "linear" => Self::Linear,
+            "sine" => Self::Sine,
+            "linear-extra" if extras.len() == 1 => {
+                Self::LinearToAndBack(extras[0].as_ref().parse().ok()?)
+            }
+            "sine-extra" if extras.len() == 1 => {
+                Self::SineToAndBack(extras[0].as_ref().parse().ok()?)
+            }
+            _ => return None,
+        })
+    }
+    pub fn apply_extras(&self, extras: &mut Vec<String>) {
+        match self {
+            Self::Linear | Self::Sine => {}
+            Self::LinearToAndBack(extra) | Self::SineToAndBack(extra) => {
+                extras.push(extra.to_string())
+            }
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Transition {
@@ -149,6 +180,16 @@ impl SharedState {
             strength: Strength::new(0.0),
             week_schedule: scheduler::WeekScheduler::default(),
         }
+
+pub fn weekday_to_lowercase_str(weekday: &Weekday) -> &'static str {
+    match *weekday {
+        Weekday::Mon => "mon",
+        Weekday::Tue => "tue",
+        Weekday::Wed => "wed",
+        Weekday::Thu => "thu",
+        Weekday::Fri => "fri",
+        Weekday::Sat => "sat",
+        Weekday::Sun => "sun",
     }
 }
 
