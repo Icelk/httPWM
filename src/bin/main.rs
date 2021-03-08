@@ -1,8 +1,8 @@
 use kvarn::prelude::*;
 use pwm_dev::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
-    sync::{atomic, Arc, Mutex},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -47,26 +47,24 @@ fn main() {
 fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -> kvarn::Config {
     let mut bindings = FunctionBindings::new();
 
+    let state = { controller.lock().unwrap().get_state() };
+
     let ctl = move || Arc::clone(&controller);
     let controller = ctl();
     bindings.bind_page("/clear-schedulers", move |_, _, _| {
-        controller.lock().unwrap().send(Command::ClearAllSchedulers);
+        {
+            controller.lock().unwrap().send(Command::ClearAllSchedulers);
+        }
 
         (utility::ContentType::PlainText, Cached::Dynamic)
     });
     let controller = ctl();
-    let set_strength = Arc::new(atomic::AtomicU8::new(0));
-    let strength = Arc::clone(&set_strength);
     bindings.bind_page("/set-strength", move |buffer, req, cache| {
         let query = req.uri().query().map(|s| parse::format_query(s));
         let value = query.as_ref().and_then(|q| q.get("strength"));
 
         match value.and_then(|v| v.parse().ok()) {
             Some(f) => {
-                strength.store(
-                    clamp_map_from_0_to_1(f, 0.0, 255.0) as u8,
-                    atomic::Ordering::Release,
-                );
                 controller
                     .lock()
                     .unwrap()
@@ -79,21 +77,18 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         }
         (utility::ContentType::Html, Cached::Dynamic)
     });
-    bindings.bind_page("/get-strength", move |buffer, _, _| {
-        let strength = format!("{}", set_strength.load(atomic::Ordering::Acquire));
-        buffer.extend(strength.as_bytes());
-        (utility::ContentType::PlainText, Cached::Dynamic)
-    });
     let controller = ctl();
     bindings.bind_page("/set-day-time", move |buffer, req, cache| {
         let command = serde_json::from_slice(req.body())
             .ok()
-            .and_then(|set_day: SetDay| set_day.to_command());
+            .and_then(|set_day: DayData| set_day.to_command());
 
         match command {
             Some(command) => {
                 println!("Changed time of day to {:?}", command);
-                controller.lock().unwrap().send(command);
+                {
+                    controller.lock().unwrap().send(command);
+                }
             }
             None => {
                 utility::write_error(buffer, 400, cache);
@@ -108,7 +103,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
 
         let transition = serde_json::from_slice(req.body())
             .ok()
-            .and_then(|set_transition: SetTransition| set_transition.to_transition());
+            .and_then(|set_transition: TransitionData| set_transition.to_transition());
         let transition = match transition {
             Some(command) => command,
             None => {
@@ -120,17 +115,21 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         match action {
             Some("set") => {
                 println!("Setting default transition.");
-                controller
-                    .lock()
-                    .unwrap()
-                    .send(Command::ChangeDayTimerTransition(transition));
+                {
+                    controller
+                        .lock()
+                        .unwrap()
+                        .send(Command::ChangeDayTimerTransition(transition));
+                }
             }
             Some("preview") => {
                 println!("Applying transition.");
-                controller
-                    .lock()
-                    .unwrap()
-                    .send(Command::SetTransition(transition));
+                {
+                    controller
+                        .lock()
+                        .unwrap()
+                        .send(Command::SetTransition(transition));
+                }
             }
             _ => {
                 utility::write_error(buffer, 400, cache);
@@ -138,6 +137,11 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         }
 
         (utility::ContentType::Html, Cached::Dynamic)
+    });
+    bindings.bind_page("/get-state", move |buffer, _, _| {
+        let state = StateData::from_shared_state(&*state.lock().unwrap());
+        serde_json::to_writer(buffer, &state).expect("failed to parse shared state");
+        (utility::ContentType::JSON, Cached::Dynamic)
     });
 
     let localhost = Host::no_certification("web", Some(bindings));
@@ -147,22 +151,12 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     Config::new(ports)
 }
 
-fn clamp_map_from_0_to_1(value: f64, min: f64, max: f64) -> f64 {
-    if value < min {
-        min
-    } else if value > max {
-        max
-    } else {
-        value * max
-    }
-}
-
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct SetDay {
+struct DayData {
     day: String,
     time: Option<String>,
 }
-impl SetDay {
+impl DayData {
     pub fn to_command(self) -> Option<Command> {
         let day: chrono::Weekday = self.day.parse().ok()?;
         let time = match self.time {
@@ -177,15 +171,15 @@ impl SetDay {
     }
 }
 
-#[derive(Deserialize, Debug)]
-struct SetTransition {
+#[derive(Deserialize, Serialize, Debug)]
+struct TransitionData {
     from: f64,
     to: f64,
     time: f64,
     interpolation: String,
     extras: Vec<String>,
 }
-impl SetTransition {
+impl TransitionData {
     pub fn to_transition(self) -> Option<Transition> {
         let from = Strength::new_clamped(self.from);
         let to = Strength::new_clamped(self.to);
@@ -198,5 +192,45 @@ impl SetTransition {
             time,
             interpolation,
         })
+    }
+
+    pub fn from_transition(transition: &Transition) -> Self {
+        let mut extras = Vec::with_capacity(4);
+
+        transition.interpolation.apply_extras(&mut extras);
+
+        Self {
+            from: Strength::clone(&transition.from).into_inner(),
+            to: Strength::clone(&transition.to).into_inner(),
+            time: transition.time.as_secs_f64(),
+            interpolation: transition.interpolation.as_str().to_string(),
+            extras,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct StateData {
+    strength: f64,
+    days: HashMap<String, Option<String>>,
+    transition: TransitionData,
+}
+impl StateData {
+    pub fn from_shared_state(state: &SharedState) -> Self {
+        let mut days = HashMap::with_capacity(7);
+        let mut day = chrono::Weekday::Mon;
+        for _ in 0..7 {
+            days.insert(
+                weekday_to_lowercase_str(&day).to_string(),
+                state.week_schedule.get(day).map(|time| time.to_string()),
+            );
+            day = day.succ();
+        }
+
+        Self {
+            strength: Strength::clone(&state.strength).into_inner(),
+            days,
+            transition: TransitionData::from_transition(&state.week_schedule.transition),
+        }
     }
 }

@@ -175,11 +175,13 @@ pub struct SharedState {
     pub week_schedule: scheduler::WeekScheduler,
 }
 impl SharedState {
-    pub fn new() -> Self {
+    pub fn new(scheduler: &scheduler::WeekScheduler) -> Self {
         Self {
             strength: Strength::new(0.0),
-            week_schedule: scheduler::WeekScheduler::default(),
+            week_schedule: scheduler::WeekScheduler::clone(scheduler),
         }
+    }
+}
 
 pub fn weekday_to_lowercase_str(weekday: &Weekday) -> &'static str {
     match *weekday {
@@ -226,7 +228,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
         // make channel
         let (sender, receiver) = mpsc::sync_channel(2);
 
-        let shared_state = Arc::new(Mutex::new(SharedState::new()));
+        let shared_state = Arc::new(Mutex::new(SharedState::new(&scheduler)));
 
         let shared = Arc::clone(&shared_state);
 
