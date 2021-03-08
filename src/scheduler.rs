@@ -11,9 +11,7 @@ pub enum Keep {
     Remove,
 }
 pub trait Scheduler: Debug + Send {
-    fn add(&mut self) -> Keep {
-        Keep::Remove
-    }
+    fn advance(&mut self) -> Keep;
     /// Main function. It gets the time to the next occurrence of this Scheduler.
     fn get_next(&self) -> Option<(Duration, Command)>;
 }
@@ -87,7 +85,7 @@ impl WeekScheduler {
     }
 }
 impl Scheduler for WeekScheduler {
-    fn add(&mut self) -> Keep {
+    fn advance(&mut self) -> Keep {
         self.current = self.current.succ();
         Keep::Keep
     }
