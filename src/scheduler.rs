@@ -11,9 +11,13 @@ pub enum Keep {
     Remove,
 }
 pub trait Scheduler: Debug + Send {
+    /// Advances the internal state when the scheduled time in [`Scheduler::get_next()`] is reached.
+    /// You can specify if you want to persist in the list of schedulers or be removed.
     fn advance(&mut self) -> Keep;
     /// Main function. It gets the time to the next occurrence of this Scheduler.
     fn get_next(&self) -> Option<(Duration, Command)>;
+    /// A description to show the user. Should contain information about what this scheduler wakes up to do.
+    fn description(&self) -> &str;
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -121,6 +125,10 @@ impl Scheduler for WeekScheduler {
             }
             None => None,
         }
+    }
+
+    fn description(&self) -> &str {
+        "Can schedule once per weekday, repeating every week."
     }
 }
 impl Default for WeekScheduler {
@@ -250,21 +258,17 @@ pub enum SleepTime {
 
 pub struct State {
     // Data
-    day_schedule: WeekScheduler,
-    schedulers: Vec<Box<dyn Scheduler>>,
     shared: Arc<Mutex<SharedState>>,
 
     finish: bool,
     wake_up: Option<(Instant, Command)>,
     transition: Option<TransitionState>,
     last_instance: Instant,
-    last_scheduler: Option<usize>,
+    last_scheduler: Option<String>,
 }
 impl State {
-    pub fn new(scheduler: WeekScheduler, state: Arc<Mutex<SharedState>>) -> Self {
+    pub fn new(state: Arc<Mutex<SharedState>>) -> Self {
         Self {
-            day_schedule: scheduler,
-            schedulers: Vec::new(),
             shared: state,
             finish: false,
             wake_up: None,
@@ -272,9 +276,6 @@ impl State {
             last_instance: Instant::now(),
             last_scheduler: None,
         }
-    }
-    pub fn add_scheduler(&mut self, scheduler: Box<dyn Scheduler>) {
-        self.schedulers.push(scheduler);
     }
 
     pub fn process(&mut self, command: Option<Command>) -> Action {
@@ -300,23 +301,31 @@ impl State {
                 }
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
-                    *self.day_schedule.get_mut(day) = time;
-                    self.shared.lock().unwrap().week_schedule =
-                        WeekScheduler::clone(&self.day_schedule);
+                    {
+                        *self.shared.lock().unwrap().week_schedule.get_mut(day) = time;
+                    }
                     self.get_next()
                 }
                 Command::ChangeDayTimerTransition(new_transition) => {
-                    self.day_schedule.transition = new_transition;
-                    self.shared.lock().unwrap().week_schedule =
-                        WeekScheduler::clone(&self.day_schedule);
+                    {
+                        self.shared.lock().unwrap().week_schedule.transition = new_transition;
+                    }
                     self.get_next()
                 }
-                Command::AddScheduler(scheduler) => {
-                    self.schedulers.push(scheduler);
+                Command::AddReplaceScheduler(name, scheduler) => {
+                    self.shared
+                        .lock()
+                        .unwrap()
+                        .schedulers
+                        .insert(name, scheduler);
+                    self.get_next()
+                }
+                Command::RemoveScheduler(name) => {
+                    self.shared.lock().unwrap().schedulers.remove(&name);
                     self.get_next()
                 }
                 Command::ClearAllSchedulers => {
-                    self.schedulers.clear();
+                    self.shared.lock().unwrap().schedulers.clear();
                     self.get_next()
                 }
                 Command::SetTransition(transition) => {
@@ -330,20 +339,24 @@ impl State {
                 // check wake up Option<>
                 match self.wake() {
                     Some(command) => {
-                        match self.last_scheduler {
-                            Some(index) => match self.schedulers.get_mut(index) {
-                                Some(scheduler) => match scheduler.add() {
-                                    Keep::Keep => {}
-                                    Keep::Remove => {
-                                        self.schedulers.remove(index);
+                        {
+                            let mut lock = self.shared.lock().unwrap();
+                            match self.last_scheduler.as_ref() {
+                                Some(name) => match lock.schedulers.get_mut(name) {
+                                    Some(scheduler) => match scheduler.advance() {
+                                        Keep::Keep => {}
+                                        Keep::Remove => {
+                                            lock.schedulers.remove(name);
+                                        }
+                                    },
+                                    None => {
+                                        panic!("attempting to get scheduler not existing. Did you clear the list?");
                                     }
                                 },
                                 None => {
-                                    panic!("attempting to get scheduler not existing. Did you clear the list?");
+                                    // Discarding, because we know it'll want to continue.
+                                    lock.week_schedule.advance();
                                 }
-                            },
-                            None => {
-                                self.day_schedule.add();
                             }
                         }
                         let action = self.process(Some(command));
@@ -390,20 +403,23 @@ impl State {
         }
     }
     fn queue_sleep(&mut self) -> SleepTime {
-        let next = self
-            .schedulers
-            .iter()
-            .filter_map(|s| s.get_next())
-            .min_by_key(|(d, _)| *d);
-        let next = match Scheduler::get_next(&self.day_schedule) {
-            Some((dur, cmd)) => match next {
-                Some((next_dur, _)) => match dur < next_dur {
-                    true => Some((dur, cmd)),
-                    false => next,
+        let next = {
+            let lock = self.shared.lock().unwrap();
+            let next = lock
+                .schedulers
+                .iter()
+                .filter_map(|(_name, s)| s.get_next())
+                .min_by_key(|(d, _)| *d);
+            match Scheduler::get_next(&lock.week_schedule) {
+                Some((dur, cmd)) => match next {
+                    Some((next_dur, _)) => match dur < next_dur {
+                        true => Some((dur, cmd)),
+                        false => next,
+                    },
+                    None => Some((dur, cmd)),
                 },
-                None => Some((dur, cmd)),
-            },
-            None => next,
+                None => next,
+            }
         };
         match next {
             Some((dur, cmd)) => {

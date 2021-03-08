@@ -1,7 +1,9 @@
 pub mod scheduler;
+
 use chrono::prelude::*;
 use rppal::{gpio::OutputPin, pwm::Pwm};
-pub use scheduler::Scheduler;
+pub use scheduler::{Scheduler, WeekScheduler};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use std::{
     sync::{mpsc, Arc, Mutex},
@@ -102,7 +104,8 @@ pub enum Command {
     SetTransition(Transition),
     ChangeDayTimer(Weekday, Option<NaiveTime>),
     ChangeDayTimerTransition(Transition),
-    AddScheduler(Box<dyn Scheduler>),
+    AddReplaceScheduler(String, Box<dyn Scheduler>),
+    RemoveScheduler(String),
     ClearAllSchedulers,
     Finish,
 }
@@ -171,15 +174,27 @@ impl VariableOut for PrintOut {
 
 #[derive(Debug)]
 pub struct SharedState {
-    pub strength: Strength,
-    pub week_schedule: scheduler::WeekScheduler,
+    strength: Strength,
+    week_schedule: WeekScheduler,
+    schedulers: HashMap<String, Box<dyn Scheduler>>,
 }
 impl SharedState {
-    pub fn new(scheduler: &scheduler::WeekScheduler) -> Self {
+    pub fn new(scheduler: WeekScheduler) -> Self {
         Self {
             strength: Strength::new(0.0),
-            week_schedule: scheduler::WeekScheduler::clone(scheduler),
+            week_schedule: scheduler,
+            schedulers: HashMap::new(),
         }
+    }
+
+    pub fn get_week_schedule(&self) -> &WeekScheduler {
+        &self.week_schedule
+    }
+    pub fn get_strength(&self) -> &Strength {
+        &self.strength
+    }
+    pub fn get_schedulers(&self) -> &HashMap<String, Box<dyn Scheduler>> {
+        &self.schedulers
     }
 }
 
@@ -202,18 +217,6 @@ enum Sleeping {
     Wake,
 }
 
-/// # Main loop of thread
-///
-/// - check for new commands
-/// > If got new, reset state of transition!
-/// - check all schedulers
-/// > Get minimum, and if any are due, cancel transition.
-/// - check transition
-/// > Progress state of transition or remove if complete
-/// - if nothing happened, sleep 'till next scheduler
-///
-/// This allows the thread to be `unpark()`ed.
-///
 /// The handler's job is to handle [`Scheduler`]s and transitions.
 ///
 /// This is done by spawning a thread and running all code on it.
@@ -224,17 +227,17 @@ pub struct Controller<T: VariableOut + Send + 'static> {
     shared_state: Arc<Mutex<SharedState>>,
 }
 impl<T: VariableOut + Send + 'static> Controller<T> {
-    pub fn new(mut output: T, scheduler: scheduler::WeekScheduler) -> Self {
+    pub fn new(mut output: T, scheduler: WeekScheduler) -> Self {
         // make channel
         let (sender, receiver) = mpsc::sync_channel(2);
 
-        let shared_state = Arc::new(Mutex::new(SharedState::new(&scheduler)));
+        let shared_state = Arc::new(Mutex::new(SharedState::new(scheduler)));
 
         let shared = Arc::clone(&shared_state);
 
         let handle = thread::spawn(move || {
             let receiver = receiver;
-            let mut state = scheduler::State::new(scheduler, shared);
+            let mut state = scheduler::State::new(shared);
             let mut sleeping: Sleeping = Sleeping::Wake;
             let mut enabled = None;
             loop {

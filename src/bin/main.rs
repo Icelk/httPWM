@@ -222,15 +222,18 @@ impl StateData {
         for _ in 0..7 {
             days.insert(
                 weekday_to_lowercase_str(&day).to_string(),
-                state.week_schedule.get(day).map(|time| time.to_string()),
+                state
+                    .get_week_schedule()
+                    .get(day)
+                    .map(|time| time.to_string()),
             );
             day = day.succ();
         }
 
         Self {
-            strength: Strength::clone(&state.strength).into_inner(),
+            strength: Strength::clone(state.get_strength()).into_inner(),
             days,
-            transition: TransitionData::from_transition(&state.week_schedule.transition),
+            transition: TransitionData::from_transition(&state.get_week_schedule().transition),
         }
     }
 }
