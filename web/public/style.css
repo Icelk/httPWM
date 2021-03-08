@@ -1,0 +1,62 @@
+:root {
+    --txt-col: #cfcfcf;
+    --txt-second: #9f9f9f;
+    --bg-col: #00071f;
+    --bg-second: #2f5faf;
+}
+
+input, button, select {
+    background-color: var(--bg-second);
+    border: solid var(--txt-col);
+
+    --border-width: 2px;
+
+    border-radius: 4px;
+
+    border-width: 0 var(--border-width) var(--border-width) 0;
+    color: inherit;
+    margin: 0.25em;
+    padding: 0.15em;
+}
+.slider {
+    padding: 0;
+    border: none;
+}
+::placeholder {
+    color: var(--txt-second);
+}
+
+body{
+    color: var(--txt-col);
+    background-color: var(--bg-col);
+}
+
+table {
+  border-collapse: collapse;
+  border-style: hidden;
+  letter-spacing: 1px;
+  font-size: 0.8rem;
+}
+.table-round {
+    border: 2px solid var(--bg-second);
+    border-radius: 1em;
+    display: inline-block;
+}
+
+td, th {
+    border: 1px solid var(--bg-second);
+    padding: 0.75em;
+}
+
+td {
+    text-align: center;
+}
+
+.center{
+    text-align: center;
+    margin-left: auto;
+    margin-right: auto;
+}
+.m-top {
+    margin-top: 1em;
+}

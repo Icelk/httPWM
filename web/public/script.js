@@ -25,14 +25,15 @@ async function sendSet(strength) {
 // Day must exist, can be 'mon', 'tue', etc.
 // Time can be null or "HH:MM:SS" format.
 async function sendDayTime(day, time) {
-    fetch("/set-day-time", {
+    await fetch("/set-day-time", {
         method: 'POST',
         headers: {
             'content-type': 'application/json'
         },
         redirect: 'error',
         body: JSON.stringify({ day: day, time: time })
-    }).await
+    });
+    await getAndApplyState();
 }
 function getAndSendDayTime() {
     if (dayOption.value === "some") {
@@ -61,9 +62,26 @@ function checkDailySchedulerOption() {
     dayTime.style.display = (dayOption.value === "some") ? "initial" : "none";
 }
 
+async function getAndApplyState() {
+    let response = await (await fetch("/get-state")).json();
+    console.log(response);
+
+    mainStrength.value = response.strength;
+    for (const day in response.days) {
+        const time = response.days[day];
+        const element = document.getElementById(day);
+
+        if (element !== null) {
+            element.innerHTML = (time === null) ? `No time set.` : `Time set at ${time}`;
+        }
+    }
+
+}
+
 async function load() {
-    let response = await (await fetch("/get-strength")).text();
-    mainStrength.value = Number(response) / 255;
+    // let response = await (await fetch("/get-strength")).text();
+    // mainStrength.value = Number(response) / 255;
+    await getAndApplyState();
 }
 
 load();
