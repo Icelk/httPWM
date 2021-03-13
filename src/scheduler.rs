@@ -107,35 +107,30 @@ impl Scheduler for WeekScheduler {
     }
     fn get_next(&self) -> Option<(Duration, Command)> {
         let now = get_naive_now();
-        let next = self.get_next_from_day(now.weekday()).map(|(t, _)| *t);
-        match next {
-            Some(next) => {
-                let next = if now.time()
-                    < next
-                        - chrono::Duration::from_std(self.transition.time)
-                            .unwrap_or(chrono::Duration::zero())
-                {
-                    now.date().and_time(next)
-                } else {
-                    let (time, day) = self.get_next_from_day(now.weekday().succ())?;
-                    // Since we get the next day from function
-                    let day = day + 1;
+        let next = self.get_next_from_day(now.weekday()).map(|(t, _)| *t)?;
+        let next = if now.time()
+            < next
+                - chrono::Duration::from_std(self.transition.time)
+                    .unwrap_or(chrono::Duration::zero())
+        {
+            now.date().and_time(next)
+        } else {
+            let (time, day) = self.get_next_from_day(now.weekday().succ())?;
+            // Since we get the next day from function
+            let day = day + 1;
 
-                    now.date().and_time(*time) + chrono::Duration::days(day as i64)
-                };
-                // The expect here should never happen, we checked above if now is less than next.
-                let next = (next - now)
-                    .to_std()
-                    .expect("duration is negative")
-                    .checked_sub(self.transition.time)
-                    .unwrap_or(Duration::new(0, 0));
-                Some((
-                    next,
-                    Command::SetTransition(Transition::clone(&self.transition)),
-                ))
-            }
-            None => None,
-        }
+            now.date().and_time(*time) + chrono::Duration::days(day as i64)
+        };
+        // The expect here should never happen, we checked above if now is less than next.
+        let next = (next - now)
+            .to_std()
+            .expect("duration is negative")
+            .checked_sub(self.transition.time)
+            .unwrap_or(Duration::new(0, 0));
+        Some((
+            next,
+            Command::SetTransition(Transition::clone(&self.transition)),
+        ))
     }
 
     fn description(&self) -> &str {
@@ -452,12 +447,14 @@ impl State {
         }
     }
     fn wake(&mut self) -> Option<Command> {
-        match self.wake_up.as_ref() {
-            Some((when, _)) => match when.checked_duration_since(Instant::now()) {
-                Some(_) => None,
-                None => Some(self.wake_up.take().unwrap().1),
-            },
-            None => None,
+        match self
+            .wake_up
+            .as_ref()?
+            .0
+            .checked_duration_since(Instant::now())
+        {
+            Some(_) => None,
+            None => Some(self.wake_up.take().unwrap().1),
         }
     }
 }
