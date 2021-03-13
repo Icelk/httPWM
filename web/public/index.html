@@ -14,18 +14,16 @@
     <h2>Set current value</h2>
     <i>Overrides current transition (including ongoing scheduled transitions)</i>
     <br>
-    <input style="width: 30em;" class="slider" type="range" name="Strength" id="strength" oninput="toSend = this.value"
-        min="0" max="1" value="0" step="0.01">
+    <input class="slider" type="range" name="Strength" id="strength" oninput="toSend = this.value" min="0" max="1"
+        value="0" step="0.001">
 
     <h2>Transitions</h2>
     <i>Adjust the settings to your liking and either play it or set it as the default for the daily schedules.
         The following values are defaults for the daily schedule</i>
     <br>
-    <input style="width: 30em;" class="slider" type="range" name="From Strength" id="fromStrength" min="0" max="1"
-        value="0" step="0.01">
+    <input class="slider" type="range" name="From Strength" id="fromStrength" min="0" max="1" value="0" step="0.01">
     <br>
-    <input style="width: 30em;" class="slider" type="range" name="To Strength" id="toStrength" min="0" max="1" value="1"
-        step="0.01">
+    <input class="slider" type="range" name="To Strength" id="toStrength" min="0" max="1" value="1" step="0.01">
     <br>
     <input type="number" style="width: 6em;" name="Transition Time" id="transitionTime" placeholder="secs" min="0.1"
         value="30">
