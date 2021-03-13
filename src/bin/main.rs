@@ -44,12 +44,34 @@ fn main() {
     create_server(controller).run();
 }
 
+fn get_query_value<'a>(
+    req: &'a http::Request<&[u8]>,
+    buffer: &mut Vec<u8>,
+    cache: &mut kvarn::cache::types::FsCache,
+    query: &str,
+) -> Option<&'a str> {
+    let queries = req.uri().query().map(|s| parse::format_query(s));
+    let value = queries.as_ref().and_then(|q| q.get(query));
+
+    match value {
+        Some(value) => Some(*value),
+        None => {
+            // Write err
+            utility::write_error(buffer, 400, cache);
+            None
+        }
+    }
+}
+
 fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -> kvarn::Config {
     let mut bindings = FunctionBindings::new();
 
-    let state = { controller.lock().unwrap().get_state() };
-
+    let state = {
+        let state = controller.lock().unwrap().get_state();
+        move || Arc::clone(&state)
+    };
     let ctl = move || Arc::clone(&controller);
+
     let controller = ctl();
     bindings.bind_page("/clear-schedulers", move |_, _, _| {
         {
@@ -58,23 +80,17 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
 
         (utility::ContentType::PlainText, Cached::Dynamic)
     });
+
     let controller = ctl();
     bindings.bind_page("/set-strength", move |buffer, req, cache| {
-        let query = req.uri().query().map(|s| parse::format_query(s));
-        let value = query.as_ref().and_then(|q| q.get("strength"));
-
-        match value.and_then(|v| v.parse().ok()) {
-            Some(f) => {
+        get_query_value(req, buffer, cache, "strength")
+            .and_then(|value| value.parse().ok())
+            .map(|f| {
                 controller
                     .lock()
                     .unwrap()
-                    .send(Command::Set(Strength::new_clamped(f)));
-            }
-            None => {
-                // Write err
-                utility::write_error(buffer, 400, cache);
-            }
-        }
+                    .send(Command::Set(Strength::new_clamped(f)))
+            });
         (utility::ContentType::Html, Cached::Dynamic)
     });
     let controller = ctl();
@@ -96,6 +112,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         }
         (utility::ContentType::Html, Cached::Dynamic)
     });
+
     let controller = ctl();
     bindings.bind_page("/transition", move |buffer, req, cache| {
         let queries = req.uri().query().map(|q| parse::format_query(q));
@@ -138,7 +155,8 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
 
         (utility::ContentType::Html, Cached::Dynamic)
     });
-    let local_state = Arc::clone(&state);
+
+    let local_state = state();
     bindings.bind_page("/get-state", move |buffer, _, _| {
         let state = StateData::from_shared_state(&*local_state.lock().unwrap());
         serde_json::to_writer(buffer, &state).expect("failed to parse shared state");
@@ -161,7 +179,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         (utility::ContentType::Html, Cached::Dynamic)
     });
 
-    let local_state = Arc::clone(&state);
+    let local_state = state();
     bindings.bind_page("/get-schedulers", move |buffer, _, _| {
         let mut schedulers: Vec<(SchedulerData, Duration)> = local_state
             .lock()
@@ -181,6 +199,17 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         let schedulers: Vec<SchedulerData> = schedulers.into_iter().map(|(data, _)| data).collect();
 
         serde_json::to_writer(buffer, &schedulers).expect("failed to write to Vec?");
+        (utility::ContentType::PlainText, Cached::Dynamic)
+    });
+
+    let controller = ctl();
+    bindings.bind_page("/remove-scheduler", move |buffer, req, cache| {
+        get_query_value(req, buffer, cache, "name").map(|name| {
+            controller
+                .lock()
+                .unwrap()
+                .send(Command::RemoveScheduler(name.to_string()))
+        });
         (utility::ContentType::PlainText, Cached::Dynamic)
     });
 
