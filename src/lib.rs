@@ -95,17 +95,66 @@ impl Default for Transition {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Command {
     Set(Strength),
     SetTransition(Transition),
     ChangeDayTimer(Weekday, Option<NaiveTime>),
     ChangeDayTimerTransition(Transition),
-    AddReplaceScheduler(String, Arc<Mutex<dyn Scheduler>>),
+    AddReplaceScheduler(String, Box<dyn Scheduler>),
     RemoveScheduler(String),
     ClearAllSchedulers,
     Finish,
 }
+impl Command {
+    pub fn can_clone(&self) -> bool {
+        match self {
+            Self::Set(_)
+            | Self::SetTransition(_)
+            | Self::ChangeDayTimer(_, _)
+            | Self::ChangeDayTimerTransition(_)
+            | Self::RemoveScheduler(_)
+            | Self::ClearAllSchedulers
+            | Self::Finish => true,
+            Self::AddReplaceScheduler(_, _) => false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ClonableCommand(Command);
+impl ClonableCommand {
+    pub fn new(command: Command) -> Option<Self> {
+        if command.can_clone() {
+            Some(Self(command))
+        } else {
+            None
+        }
+    }
+    pub fn into_inner(self) -> Command {
+        self.0
+    }
+}
+impl Clone for ClonableCommand {
+    fn clone(&self) -> Self {
+        Self(match &self.0 {
+            Command::Set(s) => Command::Set(Strength::clone(s)),
+            Command::SetTransition(t) => Command::SetTransition(Transition::clone(t)),
+            Command::ChangeDayTimer(d, t) => Command::ChangeDayTimer(*d, *t),
+            Command::ChangeDayTimerTransition(t) => {
+                Command::ChangeDayTimerTransition(Transition::clone(t))
+            }
+            Command::RemoveScheduler(s) => Command::RemoveScheduler(String::clone(s)),
+            Command::ClearAllSchedulers => Command::ClearAllSchedulers,
+            Command::Finish => Command::Finish,
+
+            Command::AddReplaceScheduler(_, _) => {
+                unreachable!("should have been checked when creating `ClonableCommand`")
+            }
+        })
+    }
+}
+
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Action {
     /// Thread sleep this amount and call me again.
@@ -185,7 +234,7 @@ impl VariableOut for PrintOut {
 pub struct SharedState {
     strength: Strength,
     week_schedule: WeekScheduler,
-    schedulers: HashMap<String, Arc<Mutex<dyn Scheduler>>>,
+    schedulers: HashMap<String, Box<dyn Scheduler>>,
 }
 impl SharedState {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -202,7 +251,7 @@ impl SharedState {
     pub fn get_strength(&self) -> &Strength {
         &self.strength
     }
-    pub fn get_schedulers(&self) -> &HashMap<String, Arc<Mutex<dyn Scheduler>>> {
+    pub fn get_schedulers(&self) -> &HashMap<String, Box<dyn Scheduler>> {
         &self.schedulers
     }
 }

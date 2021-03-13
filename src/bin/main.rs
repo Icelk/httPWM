@@ -289,23 +289,19 @@ pub mod extra_schedulers {
     #[derive(Debug)]
     pub struct Common {
         description: String,
-        command: Command,
+        command: ClonableCommand,
     }
     impl Common {
         /// Returns `Err` when command is not clonable
-        pub fn new(description: String, command: Command) -> Result<Self, ()> {
-            if !command.can_clone() {
-                Err(())
-            } else {
-                Ok(Self {
-                    description,
-                    command,
-                })
+        pub fn new(description: String, command: ClonableCommand) -> Self {
+            Self {
+                description,
+                command,
             }
         }
-        pub fn get_command(&self) -> Command {
+        pub fn get_command(&self) -> ClonableCommand {
             // Ok, since it's guaranteed the command in `Common` is clonable.
-            self.command.try_clone().unwrap()
+            ClonableCommand::clone(&self.command)
         }
     }
 
@@ -324,7 +320,7 @@ pub mod extra_schedulers {
             let now = chrono::Local::now();
             let fixed_now = now.date().naive_local().and_time(now.time());
             match (self.moment - fixed_now).to_std() {
-                Ok(dur) => Some((dur, Command::clone(&self.common.command))),
+                Ok(dur) => Some((dur, self.common.get_command().into_inner())),
                 Err(_) => None,
             }
         }
@@ -356,7 +352,7 @@ pub mod extra_schedulers {
                 // Unwrap is OK, now will never be over self.time.
                 Some((
                     (self.time - now.time()).to_std().unwrap(),
-                    self.common.get_command(),
+                    self.common.get_command().into_inner(),
                 ))
             } else {
                 get_next_day(now.weekday(), |day| {
@@ -377,7 +373,7 @@ pub mod extra_schedulers {
                         .to_std()
                         .unwrap()
                 })
-                .map(|dur| (dur, self.common.get_command()))
+                .map(|dur| (dur, self.common.get_command().into_inner()))
             }
         }
         fn advance(&mut self) -> Keep {
@@ -407,7 +403,7 @@ pub mod extra_schedulers {
                 // Unwrap is OK, now will never be over self.time.
                 (
                     (self.time - now.time()).to_std().unwrap(),
-                    self.common.get_command(),
+                    self.common.get_command().into_inner(),
                 )
             } else {
                 // Unwrap is OK, it's one day ahead!
@@ -415,7 +411,7 @@ pub mod extra_schedulers {
                     ((self.time - now.time()) + chrono::Duration::days(1))
                         .to_std()
                         .unwrap(),
-                    self.common.get_command(),
+                    self.common.get_command().into_inner(),
                 )
             })
         }
@@ -444,22 +440,24 @@ impl AddSchedulerData {
     pub fn to_command(self) -> Option<Command> {
         let transition = self.transition.to_transition()?;
         let time = parse_time(&self.time)?;
-        let run_command = Command::SetTransition(transition);
-        let common = extra_schedulers::Common::new(self.description, run_command).unwrap();
+        // Unwrap is ok, since we know `SetTransition` is clonable
+        let run_command = ClonableCommand::new(Command::SetTransition(transition)).unwrap();
+        let common = extra_schedulers::Common::new(self.description, run_command);
 
-        let scheduler: Arc<Mutex<dyn Scheduler>> = match self.kind.as_str() {
-            "at" if self.extras.len() == 1 => Arc::new(Mutex::new(extra_schedulers::At::new(
-                common,
-                chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
-                    .ok()?
-                    .and_time(time),
-            ))),
-            "every-week" if self.extras.len() == 1 => Arc::new(Mutex::new(
-                extra_schedulers::EveryWeek::new(common, time, self.extras[0].parse().ok()?),
-            )),
-            "every-day" => Arc::new(Mutex::new(extra_schedulers::EveryDay::new(common, time))),
-            _ => return None,
-        };
+        let scheduler: Box<dyn Scheduler> =
+            match self.kind.as_str() {
+                "at" if self.extras.len() == 1 => Box::new(extra_schedulers::At::new(
+                    common,
+                    chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
+                        .ok()?
+                        .and_time(time),
+                )),
+                "every-week" if self.extras.len() == 1 => Box::new(
+                    extra_schedulers::EveryWeek::new(common, time, self.extras[0].parse().ok()?),
+                ),
+                "every-day" => Box::new(extra_schedulers::EveryDay::new(common, time)),
+                _ => return None,
+            };
         Some(Command::AddReplaceScheduler(self.name, scheduler))
     }
 }

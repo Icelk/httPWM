@@ -359,9 +359,9 @@ impl State {
                         {
                             let mut lock = self.shared.lock().unwrap();
                             match self.last_scheduler.as_ref() {
-                                Some(name) => match lock.schedulers.get(name) {
+                                Some(name) => match lock.schedulers.get_mut(name) {
                                     Some(scheduler) => {
-                                        let advance = scheduler.lock().unwrap().advance();
+                                        let advance = scheduler.advance();
                                         match advance {
                                             Keep::Keep => {}
                                             Keep::Remove => {
@@ -420,7 +420,7 @@ impl State {
             let next = lock
                 .schedulers
                 .iter()
-                .filter_map(|(_name, s)| s.lock().unwrap().get_next())
+                .filter_map(|(_name, s)| s.get_next())
                 .min_by_key(|(d, _)| *d);
             match Scheduler::get_next(&lock.week_schedule) {
                 Some((dur, cmd)) => match next {
