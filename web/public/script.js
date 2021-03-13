@@ -13,6 +13,7 @@ let day = document.getElementById("weekday");
 let dayTime = document.getElementById("dayTime");
 let dayOption = document.getElementById("optionTime");
 
+let schedulerList = document.getElementById("schedulerList");
 let schedulerKind = document.getElementById("schedulerKind");
 let schedulerDate = document.getElementById("schedulerDate");
 let schedulerWeekday = document.getElementById("schedulerWeekday");
@@ -37,7 +38,7 @@ window.addEventListener("unhandledrejection", (message) => {
 
 let currentNotification = null;
 const notificationInfo = "var(--bg-second)";
-const notificationError = "#8c1c2e";
+const notificationError = "var(--error)";
 const notificationTransform = "translateX(calc(200% + 2em))";
 let notificationTimeout = 5000;
 function sendNotification(message, color) {
@@ -76,6 +77,13 @@ function responseNotification(response, name, quiet = false) {
             sendNotification(`${name} succeeded!`, notificationInfo);
     } else {
         sendNotification(`${name} failed (${response.statusText})`, notificationError);
+    }
+}
+
+
+function removeAllChildren(element) {
+    while (element.children.length > 0) {
+        element.removeChild(element.children[0]);
     }
 }
 
@@ -150,9 +158,54 @@ async function getAndApplyState() {
 
 }
 
-async function overrideSchedulerList() {
-    alert("Called unimplemented function!");
+async function removeScheduler(name) {
+    let response = await fetch(`/remove-scheduler?name=${name}`);
+    responseNotification(response, "Removed scheduler");
+    await overrideSchedulerList();
 }
+
+async function overrideSchedulerList() {
+    let response = await fetch("/get-schedulers");
+    responseNotification(response, "Get schedulers", true);
+    let list = await response.json();
+
+    const none = list.length == 0;
+
+    if (none) {
+        list.push({ name: "N/A", description: "N/A", kind: "none defined", next_occurrence: "N/A" });
+    }
+
+    removeAllChildren(schedulerList);
+
+    for (let index = 0; index < list.length; index++) {
+        const data = list[index];
+        let tr = document.createElement("tr");
+
+        let name = document.createElement("td");
+        if (!none) {
+            let remove = document.createElement("a");
+            remove.innerHTML = "X";
+            remove.classList.add("remove-scheduler");
+            console.log(remove);
+            remove.addEventListener("click", (t) => removeScheduler(t.target.nextSibling.wholeText));
+            name.appendChild(remove);
+        }
+        name.appendChild(document.createTextNode(data.name));
+        let description = document.createElement("td");
+        description.innerHTML = data.description;
+        let kind = document.createElement("td");
+        kind.innerHTML = data.kind;
+        let next = document.createElement("td");
+        next.innerHTML = data.next_occurrence;
+
+        tr.appendChild(name);
+        tr.appendChild(description);
+        tr.appendChild(kind);
+        tr.appendChild(next);
+        schedulerList.appendChild(tr);
+    }
+}
+
 function checkSchedulerAddExtras() {
     let { date, day } = getSchedulerExtras();
 
@@ -204,10 +257,13 @@ async function getAndAddScheduler() {
         body: JSON.stringify(body),
     });
     responseNotification(response, "Added scheduler");
+    await overrideSchedulerList();
 }
 
 async function load() {
-    await getAndApplyState();
+    let state = getAndApplyState();
+    let schedulers = overrideSchedulerList();
+    await Promise.all([state, schedulers]);
 }
 
 load();

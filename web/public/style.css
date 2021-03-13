@@ -4,6 +4,7 @@
     --txt-second: #9f9f9f;
     --bg-col: #00071f;
     --bg-second: #2f5faf;
+    --error: #8c1c2e;
 }
 
 input, button, select {
@@ -103,7 +104,18 @@ span.notification {
     max-width: min(20em, 80vw);
 
     transform: translateX(calc(200% + 2em));
-    transition: transform ease-out 0.5s;
-    padding: 0.5em;
-    border-radius: 0.5em;
+    transition: transform ease-out 0.5s;    
+}
+
+.remove-scheduler {
+    display: inline-block;
+    cursor: pointer;
+    text-align: center;
+    width: 1em;
+    height: 1em;
+    padding: 0.25em;
+    background-color: var(--error);
+    border-radius: 0.25em;
+    margin-right: 0.5em;
+    vertical-align: middle;
 }
