@@ -98,13 +98,13 @@ impl Default for Transition {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Set(Strength),
     SetTransition(Transition),
     ChangeDayTimer(Weekday, Option<NaiveTime>),
     ChangeDayTimerTransition(Transition),
-    AddReplaceScheduler(String, Box<dyn Scheduler>),
+    AddReplaceScheduler(String, Arc<Mutex<dyn Scheduler>>),
     RemoveScheduler(String),
     ClearAllSchedulers,
     Finish,
@@ -176,7 +176,7 @@ impl VariableOut for PrintOut {
 pub struct SharedState {
     strength: Strength,
     week_schedule: WeekScheduler,
-    schedulers: HashMap<String, Box<dyn Scheduler>>,
+    schedulers: HashMap<String, Arc<Mutex<dyn Scheduler>>>,
 }
 impl SharedState {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -193,7 +193,7 @@ impl SharedState {
     pub fn get_strength(&self) -> &Strength {
         &self.strength
     }
-    pub fn get_schedulers(&self) -> &HashMap<String, Box<dyn Scheduler>> {
+    pub fn get_schedulers(&self) -> &HashMap<String, Arc<Mutex<dyn Scheduler>>> {
         &self.schedulers
     }
 }

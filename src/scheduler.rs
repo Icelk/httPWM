@@ -6,11 +6,16 @@ use crate::{
 use chrono::prelude::*;
 use std::sync::{Arc, Mutex};
 
+pub enum Progress {
+    Pending(Duration),
+    Ready(Command),
+    Error,
+}
 pub enum Keep {
     Keep,
     Remove,
 }
-pub trait Scheduler: Debug + Send {
+pub trait Scheduler: Debug + Send + Sync {
     /// Advances the internal state when the scheduled time in [`Scheduler::get_next()`] is reached.
     /// You can specify if you want to persist in the list of schedulers or be removed.
     fn advance(&mut self) -> Keep;
@@ -226,18 +231,24 @@ impl TransitionState {
     fn calculate_delta_progress(&self, delta_time: &Duration) -> f64 {
         delta_time.as_secs_f64() / self.transition.time.as_secs_f64()
     }
+    fn remap(zero_to_one: f64, zero: f64, one: f64) -> f64 {
+        zero_to_one * (one - zero) + zero
+    }
+    fn remap_and_check_finish(&self, strength: f64, finish: f64) -> TransitionStateOut {
+        let remapped = Self::remap(strength, self.transition.from.0, self.transition.to.0);
+        if self.progress >= finish {
+            TransitionStateOut::Finished(Strength::new_clamped(remapped))
+        } else {
+            TransitionStateOut::Ongoing(Strength::new(remapped))
+        }
+    }
     fn standard_interpolation<F: Fn(f64) -> f64>(
         &mut self,
         strength: F,
         delta_progress: f64,
     ) -> TransitionStateOut {
         self.progress += delta_progress;
-        TransitionStateOut::remap_and_check_finish(
-            &self.transition,
-            strength(self.progress),
-            self.progress,
-            1.0,
-        )
+        self.remap_and_check_finish(strength(self.progress), 1.0)
     }
     fn and_back_interpolation<F: Fn(f64) -> f64>(
         &mut self,
@@ -246,17 +257,13 @@ impl TransitionState {
         multiplier: f64,
     ) -> TransitionStateOut {
         self.progress += delta_progress;
-        let strength = if self.progress > 1.0 {
-            function(1.0 - ((self.progress - 1.0) / multiplier))
+        let progress = self.progress.clamp(0.0, multiplier + 1.0);
+        let strength = if progress > 1.0 {
+            function(1.0 - ((progress - 1.0) / multiplier))
         } else {
-            function(self.progress)
+            function(progress)
         };
-        TransitionStateOut::remap_and_check_finish(
-            &self.transition,
-            strength,
-            self.progress,
-            multiplier + 1.0,
-        )
+        self.remap_and_check_finish(strength, multiplier + 1.0)
     }
 }
 
@@ -352,13 +359,16 @@ impl State {
                         {
                             let mut lock = self.shared.lock().unwrap();
                             match self.last_scheduler.as_ref() {
-                                Some(name) => match lock.schedulers.get_mut(name) {
-                                    Some(scheduler) => match scheduler.advance() {
-                                        Keep::Keep => {}
-                                        Keep::Remove => {
-                                            lock.schedulers.remove(name);
+                                Some(name) => match lock.schedulers.get(name) {
+                                    Some(scheduler) => {
+                                        let advance = scheduler.lock().unwrap().advance();
+                                        match advance {
+                                            Keep::Keep => {}
+                                            Keep::Remove => {
+                                                lock.schedulers.remove(name);
+                                            }
                                         }
-                                    },
+                                    }
                                     None => {
                                         panic!("attempting to get scheduler not existing. Did you clear the list?");
                                     }
@@ -374,16 +384,7 @@ impl State {
                         action
                     }
                     // check internal transition state; get_output()
-                    None => match self.get_transition_output() {
-                        Some(s) => Action::Set(s),
-                        // check finish flag
-                        None => match self.finish {
-                            true => Action::Break,
-                            // in ↓ make sure a variable is stored of what to do when you've been woken up.
-                            // else, send sleep command 'till schedulers.iter().min()
-                            false => Action::Wait(self.queue_sleep()),
-                        },
-                    },
+                    None => self.get_next(),
                 }
             }
         }
@@ -403,6 +404,7 @@ impl State {
             let transition = self.transition.as_mut().unwrap();
             match transition.process(&delta_time) {
                 TransitionStateOut::Finished(s) => {
+                    self.shared.lock().unwrap().strength = Strength::clone(&s);
                     self.transition = None;
                     Some(s)
                 }
@@ -418,7 +420,7 @@ impl State {
             let next = lock
                 .schedulers
                 .iter()
-                .filter_map(|(_name, s)| s.get_next())
+                .filter_map(|(_name, s)| s.lock().unwrap().get_next())
                 .min_by_key(|(d, _)| *d);
             match Scheduler::get_next(&lock.week_schedule) {
                 Some((dur, cmd)) => match next {
@@ -443,7 +445,10 @@ impl State {
         match self.get_transition_output() {
             Some(s) => Action::Set(s),
             // get_sleep
-            None => Action::Wait(self.queue_sleep()),
+            None => match self.finish {
+                true => Action::Break,
+                false => Action::Wait(self.queue_sleep()),
+            },
         }
     }
     fn wake(&mut self) -> Option<Command> {
