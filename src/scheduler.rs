@@ -21,15 +21,13 @@ pub trait Scheduler: Debug + Send + Sync {
     /// You can specify if you want to persist in the list of schedulers or be removed.
     fn advance(&mut self) -> Keep;
     /// Main function. It gets the time to the next occurrence of this Scheduler.
-    fn get_next(&self) -> Option<(Duration, Command)>;
+    fn get_next(&self) -> (Duration, Command);
     /// A description to show the user. Should contain information about what this scheduler wakes up to do.
     /// Should only be used as a tip for users.
     fn description(&self) -> &str;
     /// Which type this scheduler is of.
     /// Should be used as a tip for users.
-    fn kind(&self) -> Option<&str> {
-        None
-    }
+    fn kind(&self) -> &str;
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -105,9 +103,18 @@ impl Scheduler for WeekScheduler {
         self.current = self.current.succ();
         Keep::Keep
     }
-    fn get_next(&self) -> Option<(Duration, Command)> {
+    fn get_next(&self) -> (Duration, Command) {
         let now = get_naive_now();
-        let next = self.get_next_from_day(now.weekday()).map(|(t, _)| *t)?;
+        let next = match self.get_next_from_day(now.weekday()).map(|(t, _)| *t) {
+            Some(t) => t,
+            None => {
+                // Will `Finish` after 1000 years.
+                return (
+                    Duration::from_secs(60 * 60 * 24 * 365 * 1000),
+                    Command::Finish,
+                );
+            }
+        };
         let next = if now.time()
             < next
                 - chrono::Duration::from_std(self.transition.time)
@@ -115,7 +122,9 @@ impl Scheduler for WeekScheduler {
         {
             now.date().and_time(next)
         } else {
-            let (time, day) = self.get_next_from_day(now.weekday().succ())?;
+            // Unwrap is ok; we checked the same function above and return if it was `None`.
+            // If it returns `Some` for Weekday x, it will also return `Some` for Weekday x.succ(); it's a cycle.
+            let (time, day) = self.get_next_from_day(now.weekday().succ()).unwrap();
             // Since we get the next day from function
             let day = day + 1;
 
@@ -127,18 +136,18 @@ impl Scheduler for WeekScheduler {
             .expect("duration is negative")
             .checked_sub(self.transition.time)
             .unwrap_or(Duration::new(0, 0));
-        Some((
+        (
             next,
             Command::SetTransition(Transition::clone(&self.transition)),
-        ))
+        )
     }
 
     fn description(&self) -> &str {
         "Can schedule once per weekday, repeating every week."
     }
 
-    fn kind(&self) -> Option<&str> {
-        Some("Weekly cycle")
+    fn kind(&self) -> &str {
+        "Weekly cycle"
     }
 }
 impl Default for WeekScheduler {
@@ -409,32 +418,26 @@ impl State {
             None
         }
     }
-    fn queue_sleep(&mut self) -> SleepTime {
-        let next = {
+    fn queue_sleep(&mut self) -> Duration {
+        let (dur, cmd) = {
             let lock = self.shared.lock().unwrap();
             let next = lock
                 .schedulers
                 .iter()
-                .filter_map(|(_name, s)| s.get_next())
+                .map(|(_name, s)| s.get_next())
                 .min_by_key(|(d, _)| *d);
-            match Scheduler::get_next(&lock.week_schedule) {
-                Some((dur, cmd)) => match next {
-                    Some((next_dur, _)) => match dur < next_dur {
-                        true => Some((dur, cmd)),
-                        false => next,
-                    },
-                    None => Some((dur, cmd)),
+            let (dur, cmd) = Scheduler::get_next(&lock.week_schedule);
+            match next {
+                Some((next_dur, _)) => match dur < next_dur {
+                    true => (dur, cmd),
+                    false => (dur, cmd),
                 },
-                None => next,
+                None => (dur, cmd),
             }
         };
-        match next {
-            Some((dur, cmd)) => {
-                self.wake_up = Some((Instant::now() + dur, cmd));
-                SleepTime::Duration(dur)
-            }
-            None => SleepTime::Forever,
-        }
+
+        self.wake_up = Some((Instant::now() + dur, cmd));
+        dur
     }
     fn get_next(&mut self) -> Action {
         match self.get_transition_output() {

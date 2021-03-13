@@ -309,21 +309,21 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for At {
-        fn get_next(&self) -> Option<(Duration, Command)> {
+        fn get_next(&self) -> (Duration, Command) {
             let now = get_naive_now();
-            match (self.moment - now).to_std() {
-                Ok(dur) => Some((dur, self.common.get_command().into_inner())),
-                Err(_) => None,
+            (
+                (self.moment - now).to_std().unwrap_or(Duration::new(0, 0)),
+                self.common.get_command().into_inner(),
+            )
             }
-        }
         fn advance(&mut self) -> Keep {
             Keep::Remove
         }
         fn description(&self) -> &str {
             self.common.description.as_str()
         }
-        fn kind(&self) -> Option<&str> {
-            Some("AtDateTime")
+        fn kind(&self) -> &str {
+            "At"
         }
     }
     #[derive(Debug)]
@@ -338,29 +338,30 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryWeek {
-        fn get_next(&self) -> Option<(Duration, Command)> {
+        fn get_next(&self) -> (Duration, Command) {
             let now = get_naive_now();
             if self.day == now.weekday() && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
-                Some((
+                (
                     (self.time - now.time()).to_std().unwrap(),
                     self.common.get_command().into_inner(),
-                ))
+                )
             } else {
-                get_next_day(now.weekday(), |day| {
+                // Unwrap is ok, we must have one day containing a date.
+                let (time, offset) = get_next_day(now.weekday(), |day| {
                     if day == self.day {
                         Some(self.time)
                     } else {
                         None
                     }
                 })
-                .map(|(time, offset)| {
+                .unwrap();
                     // unwrap is OK, since date is always `.succ()`
-                    ((now.date().and_time(time) + chrono::Duration::days(offset as i64)) - now)
+                let dur = ((now.date().and_time(time) + chrono::Duration::days(offset as i64))
+                    - now)
                         .to_std()
-                        .unwrap()
-                })
-                .map(|dur| (dur, self.common.get_command().into_inner()))
+                    .unwrap();
+                (dur, self.common.get_command().into_inner())
             }
         }
         fn advance(&mut self) -> Keep {
@@ -369,8 +370,8 @@ pub mod extra_schedulers {
         fn description(&self) -> &str {
             self.common.description.as_str()
         }
-        fn kind(&self) -> Option<&str> {
-            Some("EveryWeekAt")
+        fn kind(&self) -> &str {
+            "Every week at"
         }
     }
     #[derive(Debug)]
@@ -384,9 +385,9 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryDay {
-        fn get_next(&self) -> Option<(Duration, Command)> {
+        fn get_next(&self) -> (Duration, Command) {
             let now = get_naive_now();
-            Some(if now.time() < self.time {
+            if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 (
                     (self.time - now.time()).to_std().unwrap(),
@@ -400,7 +401,7 @@ pub mod extra_schedulers {
                         .unwrap(),
                     self.common.get_command().into_inner(),
                 )
-            })
+            }
         }
         fn advance(&mut self) -> Keep {
             Keep::Keep
@@ -408,8 +409,8 @@ pub mod extra_schedulers {
         fn description(&self) -> &str {
             self.common.description.as_str()
         }
-        fn kind(&self) -> Option<&str> {
-            Some("EveryDayAt")
+        fn kind(&self) -> &str {
+            "Every day at"
         }
     }
 }

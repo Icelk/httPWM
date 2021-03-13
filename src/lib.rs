@@ -158,7 +158,7 @@ impl Clone for ClonableCommand {
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Action {
     /// Thread sleep this amount and call me again.
-    Wait(scheduler::SleepTime),
+    Wait(Duration),
     /// Set the output to this strength.
     Set(Strength),
     /// Stop execution of loop
@@ -275,7 +275,6 @@ pub fn weekday_to_lowercase_str(weekday: &Weekday) -> &'static str {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum Sleeping {
-    Forever,
     To(Instant),
     Wake,
 }
@@ -322,30 +321,21 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                                 None => None,
                             }
                         }
-                        Sleeping::Forever => {
-                            thread::sleep(Duration::from_millis(1));
-                            continue;
-                        }
                         Sleeping::Wake => None,
                     },
                 };
                 let action = state.process(command);
                 match action {
-                    Action::Wait(sleep) => {
+                    Action::Wait(dur) => {
                         if enabled.map(|value| value < 0.01).unwrap_or(false) {
                             output.disable();
                             enabled = None;
                         }
-                        match sleep {
-                            scheduler::SleepTime::Duration(dur) => {
-                                match chrono::Duration::from_std(dur) {
+                        match chrono::Duration::from_std(dur) {
                                     Ok(dur) => println!("Sleeping to {:?}", get_naive_now() + dur),
                                     Err(_) => eprintln!("Sleeping to unknown date, failed to convert std::Duration to chrono::Duration when printing"),
                                 }
-                                sleeping = Sleeping::To(Instant::now() + dur)
-                            }
-                            scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
-                        }
+                        sleeping = Sleeping::To(Instant::now() + dur)
                     }
                     Action::Set(s) => {
                         if enabled.unwrap_or(0.0) == 0.0 {
