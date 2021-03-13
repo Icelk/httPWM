@@ -265,24 +265,36 @@ async function load() {
     let schedulers = overrideSchedulerList();
 
     let h2s = document.getElementsByTagName("h2");
+    let loadedData = JSON.parse(localStorage.getItem("collapsed"));
+    if (loadedData === null) {
+        loadedData = {};
+        localStorage.setItem("collapsed", JSON.stringify({}));
+    }
     for (const header of h2s) {
-        console.log(header);
         const target = header.getAttribute("toggle");
         if (target !== null) {
             const toggled = document.getElementById(target);
             header.addEventListener("click", () => {
+                let data = JSON.parse(localStorage.getItem("collapsed"));
                 if (toggled.style.maxHeight === "0px") {
-                    toggled.style.maxHeight = "100vh";
+                    toggled.style.maxHeight = "";
                     header.classList.replace("collapsed", "expanded");
+                    data[target] = "expanded";
                 } else {
                     toggled.style.maxHeight = "0px";
                     header.classList.replace("expanded", "collapsed");
+                    data[target] = "collapsed";
                 }
+                localStorage.setItem("collapsed", JSON.stringify(data));
             });
-            header.style.cursor = "pointer";
-            header.classList.add("collapsed");
             header.classList.add("collapse-host");
-            toggled.style.maxHeight = "0px";
+
+            if (loadedData !== null && loadedData[target] === "expanded") {
+                header.classList.add("expanded");
+            } else {
+                header.classList.add("collapsed");
+                toggled.style.maxHeight = "0px";
+            }
             toggled.classList.add("collapsible");
         }
     }

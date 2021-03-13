@@ -130,11 +130,14 @@ span.notification {
 .collapsible {
     transition: max-height ease-in-out 0.25s;
     overflow: hidden;
+    max-height: 100vh;
 }
 .collapse-host {
     -ms-user-select: none;
     -webkit-user-select: none;
     user-select: none;
+
+    cursor: pointer;
 }
 .collapse-host::before {
   content: ' ';
