@@ -10,8 +10,8 @@ fn main() {
     #[cfg(not(feature = "test"))]
     let pwm = rppal::pwm::Pwm::with_period(
         rppal::pwm::Channel::Pwm0,
-        Duration::from_micros(1000),
-        Duration::from_micros(0),
+        Duration::from_millis(1000),
+        Duration::from_millis(0),
         rppal::pwm::Polarity::Normal,
         true,
     )
@@ -25,13 +25,13 @@ fn main() {
         from: Strength::new(0.0),
         to: Strength::new(1.0),
         time: Duration::from_secs(15 * 60),
-        interpolation: TransitionInterpolation::LinearToAndBack(0.5),
+        interpolation: TransitionInterpolation::SineToAndBack(0.5),
     };
     let startup_transition = Transition {
         from: Strength::new(0.0),
         to: Strength::new(1.0),
         time: Duration::from_millis(1000),
-        interpolation: TransitionInterpolation::LinearToAndBack(0.5),
+        interpolation: TransitionInterpolation::SineToAndBack(0.5),
     };
 
     let scheduler = scheduler::WeekScheduler::same(time, day_transition);
