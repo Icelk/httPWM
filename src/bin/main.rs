@@ -10,7 +10,7 @@ fn main() {
     #[cfg(not(feature = "test"))]
     let pwm = rppal::pwm::Pwm::with_period(
         rppal::pwm::Channel::Pwm0,
-        Duration::from_millis(1000),
+        Duration::from_millis(1),
         Duration::from_millis(0),
         rppal::pwm::Polarity::Normal,
         true,
