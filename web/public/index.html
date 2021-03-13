@@ -12,171 +12,182 @@
 
 <body style="text-align: center;">
     <h2>Set current value</h2>
+    <br>
     <i>Overrides current transition (including ongoing scheduled transitions)</i>
     <br>
     <input class="slider" type="range" name="Strength" id="strength" oninput="toSend = this.value" min="0" max="1"
         value="0" step="0.001">
-
-    <h2>Transitions</h2>
-    <i>Adjust the settings to your liking and either play it or set it as the default for the daily schedules.
-        The following values are defaults for the daily schedule</i>
     <br>
-    <input class="slider" type="range" name="From Strength" id="fromStrength" min="0" max="1" value="0" step="0.01">
-    <br>
-    <input class="slider" type="range" name="To Strength" id="toStrength" min="0" max="1" value="1" step="0.01">
-    <br>
-    <input type="number" style="width: 6em;" name="Transition Time" id="transitionTime" placeholder="secs" min="0.1"
-        value="30">
-    <select name="Transition Interpolation" id="interpolation" onchange="checkTransitionExtras()">
-        <option value="linear">Linear</option>
-        <option value="sine">Sine</option>
-        <option value="linear-extra" selected>Linear with fade to start again</option>
-        <option value="sine-extra">Sine with fade to start again</option>
-    </select>
-    <input style="width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras" value="0.5"
-        placeholder="Fade out duration, multiplier of 'time'">
-    <button onclick="getAndSetTransition('preview')">Preview now</button>
-    <button onclick="getAndSetTransition('set')">Set as daily default</button>
 
 
-    <h2>Schedulers</h2>
-    <i>Schedulers are events that can trigger internal <code>commands</code>. When adding one, it'll associate the
-        current transition above with the event.
-        In the future, you should hopefully be available to trigger any command from this interface and associate the
-        action with a scheduler.
-        Keep in mind that the transition will <b>begin</b> at the specified time.</i>
-    <div>
-        <div style="display: none;" id="schedulerTemplate">
-            <tr>
-                <td>
-                    $name
-                </td>
-                <td>
-                    $description
-                </td>
-                <td>
-                    $kind
-                </td>
-                <td>
-                    $next
-                </td>
-            </tr>
+    <h2 toggle="transitions">Transitions</h2>
+    <div id="transitions">
+        <i>Adjust the settings to your liking and either play it or set it as the default for the daily schedules.
+            The following values are defaults for the daily schedule</i>
+        <br>
+        <input class="slider" type="range" name="From Strength" id="fromStrength" min="0" max="1" value="0" step="0.01">
+        <br>
+        <input class="slider" type="range" name="To Strength" id="toStrength" min="0" max="1" value="1" step="0.01">
+        <br>
+        <input type="number" style="width: 6em;" name="Transition Time" id="transitionTime" placeholder="secs" min="0.1"
+            value="30">
+        <select name="Transition Interpolation" id="interpolation" onchange="checkTransitionExtras()">
+            <option value="linear">Linear</option>
+            <option value="sine">Sine</option>
+            <option value="linear-extra" selected>Linear with fade to start again</option>
+            <option value="sine-extra">Sine with fade to start again</option>
+        </select>
+        <input style="width: 20em;" type="number" name="Interpolation Extra Value" id="interpolationExtras" value="0.5"
+            placeholder="Fade out duration, multiplier of 'time'">
+        <button onclick="getAndSetTransition('preview')">Preview now</button>
+        <button onclick="getAndSetTransition('set')">Set as daily default</button>
+    </div>
+
+
+    <h2 toggle="schedulers">Schedulers</h2>
+    <div id="schedulers">
+        <i>Schedulers are events that can trigger internal <code>commands</code>. When adding one, it'll associate the
+            current transition above with the event.
+            In the future, you should hopefully be available to trigger any command from this interface and associate
+            the
+            action with a scheduler.
+            Keep in mind that the transition will <b>begin</b> at the specified time.</i>
+        <div>
+            <div style="display: none;" id="schedulerTemplate">
+                <tr>
+                    <td>
+                        $name
+                    </td>
+                    <td>
+                        $description
+                    </td>
+                    <td>
+                        $kind
+                    </td>
+                    <td>
+                        $next
+                    </td>
+                </tr>
+            </div>
+
+            <span class="table-round center m-top">
+                <table>
+                    <thead>
+                        <tr>
+                            <td>Name</td>
+                            <td>Description</td>
+                            <td>Kind</td>
+                            <td>Next occurrence</td>
+                        </tr>
+                    </thead>
+                    <tbody id="schedulerList">
+                        <tr>
+                            <td>name</td>
+                            <td>hi</td>
+                            <td>unknown</td>
+                            <td>07:00:00</td>
+                        </tr>
+                        <!-- <tr class="inner-padding">
+                            <td>
+                                <input type="text" class="fill" name="Name" id="schedulerName" placeholder="Name...">
+                            </td>
+                            <td>
+                                <input type="text" class="fill" name="Description" id="schedulerDescription"
+                                    placeholder="Description...">
+                            </td>
+                        </tr> -->
+                    </tbody>
+                </table>
+            </span>
         </div>
+        <select name="Scheduler kind" id="schedulerKind" onchange="checkSchedulerAddExtras()">
+            <option value="at">At...</option>
+            <option value="every-week">Every week at...</option>
+            <option value="every-day">Every day at...</option>
+        </select>
 
+        <input type="date" name="Scheduled date" id="schedulerDate">
+        <select name="Weekday" id="schedulerWeekday">
+            <option value="mon">Monday</option>
+            <option value="tue">Tuesday</option>
+            <option value="wed">Wednesday</option>
+            <option value="thu">Thursday</option>
+            <option value="fri">Friday</option>
+            <option value="sat">Saturday</option>
+            <option value="sun">Sunday</option>
+        </select>
+        <input type="text" name="Scheduled time" id="schedulerTime" placeholder="HH:MM[:SS]">
+
+        <input type="text" name="Scheduler name" id="schedulerName" placeholder="Name">
+        <input type="text" name="Scheduler description" id="schedulerDescription" placeholder="Description">
+
+        <button onclick="getAndAddScheduler()">Add!</button>
+    </div>
+
+
+    <h2 toggle="timeOfDay">Set scheduler time of day</h2>
+    <div id="timeOfDay">
+        <i>Sets the scheduled time (if any) to perform set transition (if you haven't changed it, reload this page and
+            press
+            <code>Preview now</code> under <code>Transitions</code> to preview the default one) for a specific day.
+            Keep in mind that the transition will <b>end</b> at the specified time.</i>
+        <br>
+        <select name="Weekday" id="weekday">
+            <option value="mon">Monday</option>
+            <option value="tue">Tuesday</option>
+            <option value="wed">Wednesday</option>
+            <option value="thu">Thursday</option>
+            <option value="fri">Friday</option>
+            <option value="sat">Saturday</option>
+            <option value="sun">Sunday</option>
+        </select>
+        <select name="Option Time" id="optionTime" onchange="checkDailySchedulerOption()">
+            <option value="none">No scheduled transition</option>
+            <option value="some" selected>Transition at...</option>
+        </select>
+        <input type="text" style="width: 6em;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
+        <button onclick="getAndSendDayTime()">Change!</button>
+
+        <br>
         <span class="table-round center m-top">
             <table>
-                <thead>
+                <tbody>
                     <tr>
-                        <td>Name</td>
-                        <td>Description</td>
-                        <td>Kind</td>
-                        <td>Next occurrence</td>
+                        <td>Monday</td>
+                        <td id="mon"></td>
                     </tr>
-                </thead>
-                <tbody id="schedulerList">
                     <tr>
-                        <td>name</td>
-                        <td>hi</td>
-                        <td>unknown</td>
-                        <td>07:00:00</td>
+                        <td>Tuesday</td>
+                        <td id="tue"></td>
                     </tr>
-                    <!-- <tr class="inner-padding">
-                        <td>
-                            <input type="text" class="fill" name="Name" id="schedulerName" placeholder="Name...">
-                        </td>
-                        <td>
-                            <input type="text" class="fill" name="Description" id="schedulerDescription"
-                                placeholder="Description...">
-                        </td>
-                    </tr> -->
+                    <tr>
+
+                        <td>Wednesday</td>
+                        <td id="wed"></td>
+                    </tr>
+                    <tr>
+
+                        <td>Thursday</td>
+                        <td id="thu"></td>
+                    </tr>
+                    <tr>
+
+                        <td>Friday</td>
+                        <td id="fri"></td>
+                    </tr>
+                    <tr>
+
+                        <td>Saturday</td>
+                        <td id="sat"></td>
+                    </tr>
+                    <tr>
+                        <td>Sunday</td>
+                        <td id="sun"></td>
+                    </tr>
                 </tbody>
             </table>
         </span>
     </div>
-    <select name="Scheduler kind" id="schedulerKind" onchange="checkSchedulerAddExtras()">
-        <option value="at">At...</option>
-        <option value="every-week">Every week at...</option>
-        <option value="every-day">Every day at...</option>
-    </select>
-
-    <input type="date" name="Scheduled date" id="schedulerDate">
-    <select name="Weekday" id="schedulerWeekday">
-        <option value="mon">Monday</option>
-        <option value="tue">Tuesday</option>
-        <option value="wed">Wednesday</option>
-        <option value="thu">Thursday</option>
-        <option value="fri">Friday</option>
-        <option value="sat">Saturday</option>
-        <option value="sun">Sunday</option>
-    </select>
-    <input type="text" name="Scheduled time" id="schedulerTime" placeholder="HH:MM[:SS]">
-
-    <input type="text" name="Scheduler name" id="schedulerName" placeholder="Name">
-    <input type="text" name="Scheduler description" id="schedulerDescription" placeholder="Description">
-
-    <button onclick="getAndAddScheduler()">Add!</button>
-
-
-    <h2>Set scheduler time of day</h2>
-    <i>Sets the scheduled time (if any) to perform set transition (if you haven't changed it, reload this page and press
-        <code>Preview now</code> under <code>Transitions</code> to preview the default one) for a specific day.
-        Keep in mind that the transition will <b>end</b> at the specified time.</i>
-    <br>
-    <select name="Weekday" id="weekday">
-        <option value="mon">Monday</option>
-        <option value="tue">Tuesday</option>
-        <option value="wed">Wednesday</option>
-        <option value="thu">Thursday</option>
-        <option value="fri">Friday</option>
-        <option value="sat">Saturday</option>
-        <option value="sun">Sunday</option>
-    </select>
-    <select name="Option Time" id="optionTime" onchange="checkDailySchedulerOption()">
-        <option value="none">No scheduled transition</option>
-        <option value="some" selected>Transition at...</option>
-    </select>
-    <input type="text" style="width: 6em;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
-    <button onclick="getAndSendDayTime()">Change!</button>
-
-    <br>
-    <span class="table-round center m-top">
-        <table>
-            <tbody>
-                <tr>
-                    <td>Monday</td>
-                    <td id="mon"></td>
-                </tr>
-                <tr>
-                    <td>Tuesday</td>
-                    <td id="tue"></td>
-                </tr>
-                <tr>
-
-                    <td>Wednesday</td>
-                    <td id="wed"></td>
-                </tr>
-                <tr>
-
-                    <td>Thursday</td>
-                    <td id="thu"></td>
-                </tr>
-                <tr>
-
-                    <td>Friday</td>
-                    <td id="fri"></td>
-                </tr>
-                <tr>
-
-                    <td>Saturday</td>
-                    <td id="sat"></td>
-                </tr>
-                <tr>
-                    <td>Sunday</td>
-                    <td id="sun"></td>
-                </tr>
-            </tbody>
-        </table>
-    </span>
 </body>
 
 </html>

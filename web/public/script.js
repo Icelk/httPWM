@@ -263,6 +263,30 @@ async function getAndAddScheduler() {
 async function load() {
     let state = getAndApplyState();
     let schedulers = overrideSchedulerList();
+
+    let h2s = document.getElementsByTagName("h2");
+    for (const header of h2s) {
+        console.log(header);
+        const target = header.getAttribute("toggle");
+        if (target !== null) {
+            const toggled = document.getElementById(target);
+            header.addEventListener("click", () => {
+                if (toggled.style.maxHeight === "0px") {
+                    toggled.style.maxHeight = "100vh";
+                    header.classList.replace("collapsed", "expanded");
+                } else {
+                    toggled.style.maxHeight = "0px";
+                    header.classList.replace("expanded", "collapsed");
+                }
+            });
+            header.style.cursor = "pointer";
+            header.classList.add("collapsed");
+            header.classList.add("collapse-host");
+            toggled.style.maxHeight = "0px";
+            toggled.classList.add("collapsible");
+        }
+    }
+
     await Promise.all([state, schedulers]);
 }
 
