@@ -138,8 +138,9 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
 
         (utility::ContentType::Html, Cached::Dynamic)
     });
+    let local_state = Arc::clone(&state);
     bindings.bind_page("/get-state", move |buffer, _, _| {
-        let state = StateData::from_shared_state(&*state.lock().unwrap());
+        let state = StateData::from_shared_state(&*local_state.lock().unwrap());
         serde_json::to_writer(buffer, &state).expect("failed to parse shared state");
         (utility::ContentType::JSON, Cached::Dynamic)
     });
@@ -158,6 +159,29 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         }
 
         (utility::ContentType::Html, Cached::Dynamic)
+    });
+
+    let local_state = Arc::clone(&state);
+    bindings.bind_page("/get-schedulers", move |buffer, _, _| {
+        let mut schedulers: Vec<(SchedulerData, Duration)> = local_state
+            .lock()
+            .unwrap()
+            .get_schedulers()
+            .iter()
+            .map(|(name, scheduler)| {
+                (
+                    SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string()),
+                    scheduler.get_next().0,
+                )
+            })
+            .collect();
+
+        schedulers.sort_by(|(_, d1), (_, d2)| d1.cmp(d2));
+
+        let schedulers: Vec<SchedulerData> = schedulers.into_iter().map(|(data, _)| data).collect();
+
+        serde_json::to_writer(buffer, &schedulers).expect("failed to write to Vec?");
+        (utility::ContentType::PlainText, Cached::Dynamic)
     });
 
     let localhost = Host::no_certification("web", Some(bindings));
@@ -315,7 +339,7 @@ pub mod extra_schedulers {
                 (self.moment - now).to_std().unwrap_or(Duration::new(0, 0)),
                 self.common.get_command().into_inner(),
             )
-            }
+        }
         fn advance(&mut self) -> Keep {
             Keep::Remove
         }
@@ -356,10 +380,10 @@ pub mod extra_schedulers {
                     }
                 })
                 .unwrap();
-                    // unwrap is OK, since date is always `.succ()`
+                // unwrap is OK, since date is always `.succ()`
                 let dur = ((now.date().and_time(time) + chrono::Duration::days(offset as i64))
                     - now)
-                        .to_std()
+                    .to_std()
                     .unwrap();
                 (dur, self.common.get_command().into_inner())
             }
@@ -447,5 +471,41 @@ impl AddSchedulerData {
                 _ => return None,
             };
         Some(Command::AddReplaceScheduler(self.name, scheduler))
+    }
+}
+#[derive(Debug, Serialize)]
+struct SchedulerData {
+    name: String,
+    description: String,
+    kind: String,
+    next_occurrence: String,
+}
+impl SchedulerData {
+    pub fn from_scheduler(scheduler: &dyn Scheduler, name: String) -> Self {
+        let dur =
+            chrono::Duration::from_std(scheduler.get_next().0).expect("std duration overflowed!");
+        let next_occurrence = if dur.num_days() > 0 {
+            (get_naive_now() + dur)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        } else if dur.num_hours() > 0 {
+            format!("In {} hours", dur.num_hours())
+        } else if dur.num_minutes() > 0 {
+            format!("In {} minutes", dur.num_minutes())
+        } else {
+            format!("In {} seconds", dur.num_seconds())
+        };
+
+        // let next_occurrence = (chrono::Local::now()
+        //     + chrono::Duration::from_std(scheduler.get_next().0)
+        //         .expect("std duration overflowed!"))
+        // .to_rfc3339();
+
+        Self {
+            name,
+            description: scheduler.description().to_string(),
+            kind: scheduler.kind().to_string(),
+            next_occurrence,
+        }
     }
 }
