@@ -34,6 +34,14 @@ input:focus {
 i {
     display: inline-block;
     max-width: 75%;
+    line-height: 1.5em;
+}
+
+code {
+    background-color: #2f2f3f;
+    border-radius: 0.25em;
+    padding: 0.2em 0.3em 0.2em 0.3em;
+    font-style: normal;
 }
 
 body{
