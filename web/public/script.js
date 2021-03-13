@@ -27,6 +27,43 @@ window.setInterval(() => {
     }
 }, 25);
 
+
+let currentNotification = null;
+const notificationInfo = "var(--bg-second)";
+const notificationError = "#8c1c2e";
+const notificationTransform = "translateX(20em)";
+function sendNotification(message, color) {
+    tryClearNotification();
+
+    let element = document.createElement("span");
+    element.classList.add("notification");
+    element.style.backgroundColor = color;
+    element.innerHTML = message;
+    element.addEventListener("click", () => tryClearNotification());
+
+    document.body.appendChild(element);
+
+    setTimeout(() => { element.style.transform = "none"; }, 20);
+
+    let timeout1 = setTimeout(() => { currentNotification.element.style.transform = notificationTransform }, 5000);
+    let timeout2 = setTimeout(() => { tryClearNotification() }, 5500);
+
+    currentNotification = { element: element, timeout1: timeout1, timeout2: timeout2 };
+}
+function tryClearNotification() {
+    if (currentNotification !== null) {
+        let element = currentNotification.element;
+
+        element.style.transform = notificationTransform;
+        setTimeout(() => { document.body.removeChild(element) }, 500);
+        clearTimeout(currentNotification.timeout1);
+        clearTimeout(currentNotification.timeout2);
+
+        currentNotification = null;
+    }
+}
+
+
 async function sendSet(strength) {
     fetch(`/set-strength?strength=${strength}`).await;
 }

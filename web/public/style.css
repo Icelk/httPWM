@@ -81,3 +81,16 @@ input.fill, select.fill {
 tr.inner-padding > td {
     padding: 0;
 }
+
+
+span.notification {
+    position: fixed;
+    font-size: 1.5rem;
+    cursor: default;
+    top: 1.5em;
+    right: 2em;
+    transform: translateX(20em);
+    transition: transform ease-in-out 0.3s;
+    padding: 0.5em;
+    border-radius: 0.5em;
+}
