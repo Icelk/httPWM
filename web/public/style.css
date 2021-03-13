@@ -93,10 +93,15 @@ tr.inner-padding > td {
 
 span.notification {
     position: fixed;
+    cursor: pointer;
+
     font-size: 1.5rem;
-    cursor: default;
     top: 1.5em;
     right: 2em;
+    padding: 0.5em;
+    border-radius: 0.5em;
+    max-width: min(20em, 80vw);
+
     transform: translateX(calc(200% + 2em));
     transition: transform ease-out 0.5s;
     padding: 0.5em;
