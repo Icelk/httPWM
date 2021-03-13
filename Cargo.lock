@@ -104,6 +104,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kvarn_extensions"
+version = "0.1.0"
+dependencies = [
+ "kvarn",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -222,6 +229,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "kvarn",
+ "kvarn_extensions",
  "rppal",
  "serde",
  "serde_json",
