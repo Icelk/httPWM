@@ -73,9 +73,9 @@ function tryClearNotification() {
 function responseNotification(response, name, quiet = false) {
     if (response.ok) {
         if (!quiet)
-            sendNotification(`'${name}' succeeded!`, notificationInfo);
+            sendNotification(`${name} succeeded!`, notificationInfo);
     } else {
-        sendNotification(`'${name}' failed (${response.statusText})`, notificationError);
+        sendNotification(`${name} failed (${response.statusText})`, notificationError);
     }
 }
 
@@ -134,9 +134,9 @@ function checkDailySchedulerOption() {
 
 async function getAndApplyState() {
     let response = await fetch("/get-state");
-    let json = await response.json();
-
     responseNotification(response, "Update state", true);
+
+    let json = await response.json();
 
     mainStrength.value = json.strength;
     for (const day in json.days) {
@@ -172,10 +172,16 @@ function getSchedulerExtras() {
     return { date: date, day: day };
 }
 async function getAndAddScheduler() {
-    let kind = schedulerKind.value;
-    let time = schedulerTime.value;
     let name = schedulerName.value;
     let description = schedulerDescription.value;
+
+    if (name === "" || description === "") {
+        sendNotification("Please specify a name and description.", notificationInfo);
+        return;
+    }
+
+    let kind = schedulerKind.value;
+    let time = schedulerTime.value;
     let extras = [];
     let { date: send_date, day: send_day } = getSchedulerExtras();
     if (send_date) {
