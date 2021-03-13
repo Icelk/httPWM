@@ -27,9 +27,6 @@ impl Strength {
             Self(value)
         }
     }
-    pub fn off() -> Self {
-        Self(0.0)
-    }
     pub fn is_off(&self) -> bool {
         self.0 == 0.0
     }
@@ -127,12 +124,14 @@ pub trait VariableOut {
     fn enable(&mut self);
     /// Disable the output when not active. Here for optimization of power usage when using PWM.
     fn disable(&mut self);
+
+    /// Used to prepare the out device. Used for optimizing; internal guarantees.
+    fn prepare(&mut self);
 }
 impl VariableOut for Pwm {
     fn set(&mut self, value: Strength) {
-        self.set_pulse_width(Duration::from_micros((value.0 * 1000.0).round() as u64))
+        self.set_pulse_width(Duration::from_nanos((value.0 * 1000000.0).round() as u64))
             .unwrap();
-        self.set_period(Duration::from_micros(1000)).unwrap();
         thread::sleep(Duration::from_millis(10));
     }
     fn enable(&mut self) {
@@ -142,6 +141,12 @@ impl VariableOut for Pwm {
     fn disable(&mut self) {
         println!("Disabling hardware PWM.");
         Pwm::disable(self).expect("failed to disable hardware PWM");
+    }
+    fn prepare(&mut self) {
+        self.set_pulse_width(Duration::new(0, 0))
+            .expect("failed to set pulse width to guarantee period");
+        self.set_period(Duration::new(0, 1000000))
+            .expect("failed to set period in `enable()`");
     }
 }
 impl VariableOut for OutputPin {
@@ -156,6 +161,7 @@ impl VariableOut for OutputPin {
     fn disable(&mut self) {
         OutputPin::clear_pwm(self).expect("failed to stop software PWM")
     }
+    fn prepare(&mut self) {}
 }
 
 pub struct PrintOut;
@@ -169,6 +175,9 @@ impl VariableOut for PrintOut {
     }
     fn disable(&mut self) {
         println!("Disabling output");
+    }
+    fn prepare(&mut self) {
+        print!("Preparing device");
     }
 }
 
@@ -240,6 +249,9 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
             let mut state = scheduler::State::new(shared);
             let mut sleeping: Sleeping = Sleeping::Wake;
             let mut enabled = None;
+
+            output.prepare();
+
             loop {
                 let command = match receiver.try_recv().ok() {
                     Some(r) => {
