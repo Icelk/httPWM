@@ -89,8 +89,8 @@ span.notification {
     cursor: default;
     top: 1.5em;
     right: 2em;
-    transform: translateX(20em);
-    transition: transform ease-in-out 0.3s;
+    transform: translateX(calc(200% + 2em));
+    transition: transform ease-out 0.5s;
     padding: 0.5em;
     border-radius: 0.5em;
 }

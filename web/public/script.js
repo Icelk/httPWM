@@ -27,11 +27,19 @@ window.setInterval(() => {
     }
 }, 25);
 
+window.addEventListener("unhandledrejection", (message) => {
+    if (message.reason.message === "Failed to fetch") {
+        message.preventDefault();
+        sendNotification("Server is offline.", notificationError);
+    }
+});
+
 
 let currentNotification = null;
 const notificationInfo = "var(--bg-second)";
 const notificationError = "#8c1c2e";
-const notificationTransform = "translateX(20em)";
+const notificationTransform = "translateX(calc(200% + 2em))";
+let notificationTimeout = 5000;
 function sendNotification(message, color) {
     tryClearNotification();
 
@@ -45,8 +53,8 @@ function sendNotification(message, color) {
 
     setTimeout(() => { element.style.transform = "none"; }, 20);
 
-    let timeout1 = setTimeout(() => { currentNotification.element.style.transform = notificationTransform }, 5000);
-    let timeout2 = setTimeout(() => { tryClearNotification() }, 5500);
+    let timeout1 = setTimeout(() => { currentNotification.element.style.transform = notificationTransform }, notificationTimeout);
+    let timeout2 = setTimeout(() => { tryClearNotification() }, notificationTimeout + 500);
 
     currentNotification = { element: element, timeout1: timeout1, timeout2: timeout2 };
 }
@@ -62,15 +70,23 @@ function tryClearNotification() {
         currentNotification = null;
     }
 }
-
+function responseNotification(response, name, quiet = false) {
+    if (response.ok) {
+        if (!quiet)
+            sendNotification(`'${name}' succeeded!`, notificationInfo);
+    } else {
+        sendNotification(`'${name}' failed (${response.statusText})`, notificationError);
+    }
+}
 
 async function sendSet(strength) {
-    fetch(`/set-strength?strength=${strength}`).await;
+    let response = await fetch(`/set-strength?strength=${strength}`);
+    responseNotification(response, "Set strength", true);
 }
 // Day must exist, can be 'mon', 'tue', etc.
 // Time can be null or "HH:MM:SS" format.
 async function sendDayTime(day, time) {
-    await fetch("/set-day-time", {
+    let response = await fetch("/set-day-time", {
         method: 'POST',
         headers: {
             'content-type': 'application/json'
@@ -78,6 +94,7 @@ async function sendDayTime(day, time) {
         redirect: 'error',
         body: JSON.stringify({ day: day, time: time })
     });
+    responseNotification(response, "Set day time");
     await getAndApplyState();
 }
 function getAndSendDayTime() {
@@ -97,17 +114,16 @@ function getTransition() {
         extras: [interpolationExtras.value]
     };
 }
-function getAndSetTransition(action) {
-    if (time.value !== "" && interpolation.value !== null) {
-        fetch(`/transition?action=${action}`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-            },
-            redirect: 'error',
-            body: JSON.stringify(getTransition())
-        })
-    }
+async function getAndSetTransition(action) {
+    let response = await fetch(`/transition?action=${action}`, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+        },
+        redirect: 'error',
+        body: JSON.stringify(getTransition())
+    });
+    responseNotification(response, `${action} transition`);
 }
 function checkTransitionExtras() {
     interpolationExtras.style.display = (interpolation.value.endsWith("-extra")) ? "initial" : "none";
@@ -117,12 +133,14 @@ function checkDailySchedulerOption() {
 }
 
 async function getAndApplyState() {
-    let response = await (await fetch("/get-state")).json();
-    console.log(response);
+    let response = await fetch("/get-state");
+    let json = await response.json();
 
-    mainStrength.value = response.strength;
-    for (const day in response.days) {
-        const time = response.days[day];
+    responseNotification(response, "Update state", true);
+
+    mainStrength.value = json.strength;
+    for (const day in json.days) {
+        const time = json.days[day];
         const element = document.getElementById(day);
 
         if (element !== null) {
@@ -158,15 +176,12 @@ async function getAndAddScheduler() {
     let time = schedulerTime.value;
     let name = schedulerName.value;
     let description = schedulerDescription.value;
-    // let extras = {};
     let extras = [];
     let { date: send_date, day: send_day } = getSchedulerExtras();
     if (send_date) {
-        // extras.date = schedulerDate.value;
         extras.push(schedulerDate.value);
     }
     if (send_day) {
-        // extras.day = schedulerWeekday.value;
         extras.push(schedulerWeekday.value);
     }
 
@@ -174,14 +189,15 @@ async function getAndAddScheduler() {
 
     console.log(body);
 
-    await fetch("/add-scheduler", {
+    let response = await fetch("/add-scheduler", {
         method: 'POST',
         headers: {
             "content-type": "application/json",
         },
         redirect: 'error',
         body: JSON.stringify(body),
-    })
+    });
+    responseNotification(response, "Added scheduler");
 }
 
 async function load() {
