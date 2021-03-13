@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 
 use crate::{
-    Action, Command, Duration, Instant, SharedState, Strength, Transition, TransitionInterpolation,
+    get_naive_now, Action, Command, Duration, Instant, SharedState, Strength, Transition,
+    TransitionInterpolation,
 };
 use chrono::prelude::*;
 use std::sync::{Arc, Mutex};
@@ -105,7 +106,7 @@ impl Scheduler for WeekScheduler {
         Keep::Keep
     }
     fn get_next(&self) -> Option<(Duration, Command)> {
-        let now = Local::now();
+        let now = get_naive_now();
         let next = self.get_next_from_day(now.weekday()).map(|(t, _)| *t);
         match next {
             Some(next) => {
@@ -114,14 +115,13 @@ impl Scheduler for WeekScheduler {
                         - chrono::Duration::from_std(self.transition.time)
                             .unwrap_or(chrono::Duration::zero())
                 {
-                    now.date().and_time(next).expect("got invalid DateTime")
+                    now.date().and_time(next)
                 } else {
                     let (time, day) = self.get_next_from_day(now.weekday().succ())?;
                     // Since we get the next day from function
                     let day = day + 1;
 
-                    now.date().and_time(*time).expect("got invalid DateTime")
-                        + chrono::Duration::days(day as i64)
+                    now.date().and_time(*time) + chrono::Duration::days(day as i64)
                 };
                 // The expect here should never happen, we checked above if now is less than next.
                 let next = (next - now)

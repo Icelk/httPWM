@@ -230,6 +230,11 @@ impl VariableOut for PrintOut {
     }
 }
 
+pub fn get_naive_now() -> chrono::NaiveDateTime {
+    let now = chrono::Local::now();
+    now.date().naive_utc().and_time(now.time())
+}
+
 #[derive(Debug)]
 pub struct SharedState {
     strength: Strength,
@@ -334,7 +339,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                         match sleep {
                             scheduler::SleepTime::Duration(dur) => {
                                 match chrono::Duration::from_std(dur) {
-                                    Ok(dur) => println!("Sleeping to {:?}", Local::now() + dur),
+                                    Ok(dur) => println!("Sleeping to {:?}", get_naive_now() + dur),
                                     Err(_) => eprintln!("Sleeping to unknown date, failed to convert std::Duration to chrono::Duration when printing"),
                                 }
                                 sleeping = Sleeping::To(Instant::now() + dur)

@@ -144,7 +144,6 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
         (utility::ContentType::JSON, Cached::Dynamic)
     });
 
-    // todo!("Use chrono::Native");
     let controller = ctl();
     bindings.bind_page("/add-scheduler", move |buffer, req, cache| {
         let command = serde_json::from_slice(req.body())
@@ -279,12 +278,6 @@ pub mod extra_schedulers {
         }
         None
     }
-    pub(crate) fn apply_day_offset(
-        date_time: chrono::DateTime<chrono::Local>,
-        offset: i64,
-    ) -> chrono::DateTime<chrono::Local> {
-        date_time + chrono::Duration::days(offset)
-    }
 
     #[derive(Debug)]
     pub struct Common {
@@ -317,9 +310,8 @@ pub mod extra_schedulers {
     }
     impl Scheduler for At {
         fn get_next(&self) -> Option<(Duration, Command)> {
-            let now = chrono::Local::now();
-            let fixed_now = now.date().naive_local().and_time(now.time());
-            match (self.moment - fixed_now).to_std() {
+            let now = get_naive_now();
+            match (self.moment - now).to_std() {
                 Ok(dur) => Some((dur, self.common.get_command().into_inner())),
                 Err(_) => None,
             }
@@ -347,7 +339,7 @@ pub mod extra_schedulers {
     }
     impl Scheduler for EveryWeek {
         fn get_next(&self) -> Option<(Duration, Command)> {
-            let now = chrono::Local::now();
+            let now = get_naive_now();
             if self.day == now.weekday() && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 Some((
@@ -364,12 +356,7 @@ pub mod extra_schedulers {
                 })
                 .map(|(time, offset)| {
                     // unwrap is OK, since date is always `.succ()`
-                    (apply_day_offset(
-                        now.date()
-                            .and_time(time)
-                            .expect("invalid DateTime in EveryWeek scheduler"),
-                        offset as i64,
-                    ) - now)
+                    ((now.date().and_time(time) + chrono::Duration::days(offset as i64)) - now)
                         .to_std()
                         .unwrap()
                 })
@@ -398,7 +385,7 @@ pub mod extra_schedulers {
     }
     impl Scheduler for EveryDay {
         fn get_next(&self) -> Option<(Duration, Command)> {
-            let now = chrono::Local::now();
+            let now = get_naive_now();
             Some(if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 (
