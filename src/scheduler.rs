@@ -428,9 +428,9 @@ impl State {
                 .min_by_key(|(d, _)| *d);
             let (dur, cmd) = Scheduler::get_next(&lock.week_schedule);
             match next {
-                Some((next_dur, _)) => match dur < next_dur {
+                Some((next_dur, next_cmd)) => match dur < next_dur {
                     true => (dur, cmd),
-                    false => (dur, cmd),
+                    false => (next_dur, next_cmd),
                 },
                 None => (dur, cmd),
             }
