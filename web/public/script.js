@@ -1,3 +1,4 @@
+!> cache dynamic
 let toSend = null;
 
 let mainStrength = document.getElementById("strength");
@@ -11,6 +12,13 @@ let interpolationExtras = document.getElementById("interpolationExtras");
 let day = document.getElementById("weekday");
 let dayTime = document.getElementById("dayTime");
 let dayOption = document.getElementById("optionTime");
+
+let schedulerKind = document.getElementById("schedulerKind");
+let schedulerDate = document.getElementById("schedulerDate");
+let schedulerWeekday = document.getElementById("schedulerWeekday");
+let schedulerTime = document.getElementById("schedulerTime");
+let schedulerName = document.getElementById("schedulerName");
+let schedulerDescription = document.getElementById("schedulerDescription");
 
 window.setInterval(() => {
     if (toSend !== null) {
@@ -43,6 +51,15 @@ function getAndSendDayTime() {
     }
 
 }
+function getTransition() {
+    return {
+        from: Number(from.value),
+        to: Number(to.value),
+        time: Number(time.value),
+        interpolation: interpolation.value,
+        extras: [interpolationExtras.value]
+    };
+}
 function getAndSetTransition(action) {
     if (time.value !== "" && interpolation.value !== null) {
         fetch(`/transition?action=${action}`, {
@@ -51,7 +68,7 @@ function getAndSetTransition(action) {
                 'content-type': 'application/json',
             },
             redirect: 'error',
-            body: JSON.stringify({ from: Number(from.value), to: Number(to.value), time: Number(time.value), interpolation: interpolation.value, extras: [interpolationExtras.value] })
+            body: JSON.stringify(getTransition())
         })
     }
 }
@@ -78,12 +95,63 @@ async function getAndApplyState() {
 
 }
 
+async function overrideSchedulerList() {
+    alert("Called unimplemented function!");
+}
+function checkSchedulerAddExtras() {
+    let { date, day } = getSchedulerExtras();
+
+    schedulerDate.style.display = date ? "" : "none";
+    schedulerWeekday.style.display = day ? "" : "none";
+}
+function getSchedulerExtras() {
+    let kind = schedulerKind.value;
+    let date = false;
+    let day = false;
+
+    if (kind === "at") {
+        date = true;
+    } else if (kind === "every-week") {
+        day = true;
+    }
+    return { date: date, day: day };
+}
+async function getAndAddScheduler() {
+    let kind = schedulerKind.value;
+    let time = schedulerTime.value;
+    let name = schedulerName.value;
+    let description = schedulerDescription.value;
+    // let extras = {};
+    let extras = [];
+    let { date: send_date, day: send_day } = getSchedulerExtras();
+    if (send_date) {
+        // extras.date = schedulerDate.value;
+        extras.push(schedulerDate.value);
+    }
+    if (send_day) {
+        // extras.day = schedulerWeekday.value;
+        extras.push(schedulerWeekday.value);
+    }
+
+    const body = { kind: kind, time: time, name: name, description: description, extras: extras, transition: getTransition() };
+
+    console.log(body);
+
+    await fetch("/add-scheduler", {
+        method: 'POST',
+        headers: {
+            "content-type": "application/json",
+        },
+        redirect: 'error',
+        body: JSON.stringify(body),
+    })
+}
+
 async function load() {
-    // let response = await (await fetch("/get-strength")).text();
-    // mainStrength.value = Number(response) / 255;
     await getAndApplyState();
 }
 
 load();
 checkTransitionExtras();
 checkDailySchedulerOption();
+checkSchedulerAddExtras();
