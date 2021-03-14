@@ -24,7 +24,7 @@ serde = { version = "1.0.123", optional = true, features = ["derive"] }
 serde_json = { version = "1.0.64", optional = true }
 
 [features]
-default = ["bin", "disable-leds"]
+default = ["bin"]
 bin = ["web"]
 
 web = ["kvarn", "kvarn_extensions", "json"]
