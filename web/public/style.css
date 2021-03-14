@@ -34,15 +34,16 @@ input:focus {
 
 i {
     display: inline-block;
-    max-width: 75%;
+    max-width: 75vw;
     line-height: 1.5em;
 }
 
 h2 {
     display: inline-block;
     
-        border-bottom: var(--bg-second) 2px solid;
-        padding: 0.1em 0.5em;
+    border-bottom: var(--bg-second) 2px solid;
+    padding: 0.1em 0.5em;
+    margin-bottom: 0.25em;
 }
 
 code {
@@ -65,7 +66,7 @@ table {
 }
 .table-round {
     border: 2px solid var(--bg-second);
-    border-radius: 0.75em;
+    border-radius: 0.75e;
     display: inline-block;
 }
 
@@ -130,9 +131,18 @@ span.notification {
 }
 
 .collapsible {
+    display: inline-block;
+
     transition: max-height ease-out 0.25s;
     overflow: hidden;
-    max-height: 100vh;
+
+    backdrop-filter: contrast(0.8);
+    -webkit-backdrop-filter: contrast(0.8);
+    border-radius: 0.5em;
+}
+.collapsible-child {
+    display: inline-block;
+    padding: 0.75em;
 }
 .collapse-host {
     -ms-user-select: none;

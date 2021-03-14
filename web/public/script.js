@@ -276,12 +276,18 @@ async function load() {
             const toggled = document.getElementById(target);
             header.addEventListener("click", () => {
                 let data = JSON.parse(localStorage.getItem("collapsed"));
+
                 if (toggled.style.maxHeight === "0px") {
-                    toggled.style.maxHeight = toggled.scrollHeight + "px";
+
+                    // extra 2em if you make the screen smaller, max height should have headroom
+                    toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`;
+
                     header.classList.add("expanded");
                     data[target] = "expanded";
                 } else {
+
                     toggled.style.maxHeight = "0px";
+
                     header.classList.remove("expanded");
                     delete data[target];
                 }
@@ -290,6 +296,9 @@ async function load() {
             header.classList.add("collapse-host");
 
             if (loadedData !== null && loadedData[target] === "expanded") {
+                // so the UI has time to draw, so we can get scrollHeight
+                setTimeout(() => { toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`; }, 0);
+
                 header.classList.add("expanded");
             } else {
                 toggled.style.maxHeight = "0px";
