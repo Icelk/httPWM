@@ -130,7 +130,7 @@ span.notification {
 }
 
 .collapsible {
-    transition: max-height ease-in-out 0.25s;
+    transition: max-height ease-out 0.25s;
     overflow: hidden;
     max-height: 100vh;
 }

@@ -277,13 +277,13 @@ async function load() {
             header.addEventListener("click", () => {
                 let data = JSON.parse(localStorage.getItem("collapsed"));
                 if (toggled.style.maxHeight === "0px") {
-                    toggled.style.maxHeight = "";
-                    header.classList.replace("collapsed", "expanded");
+                    toggled.style.maxHeight = toggled.scrollHeight + "px";
+                    header.classList.add("expanded");
                     data[target] = "expanded";
                 } else {
                     toggled.style.maxHeight = "0px";
-                    header.classList.replace("expanded", "collapsed");
-                    data[target] = "collapsed";
+                    header.classList.remove("expanded");
+                    delete data[target];
                 }
                 localStorage.setItem("collapsed", JSON.stringify(data));
             });
@@ -292,7 +292,6 @@ async function load() {
             if (loadedData !== null && loadedData[target] === "expanded") {
                 header.classList.add("expanded");
             } else {
-                header.classList.add("collapsed");
                 toggled.style.maxHeight = "0px";
             }
             toggled.classList.add("collapsible");
