@@ -158,7 +158,7 @@ impl Clone for ClonableCommand {
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum Action {
     /// Thread sleep this amount and call me again.
-    Wait(Duration),
+    Wait(scheduler::SleepTime),
     /// Set the output to this strength.
     Set(Strength),
     /// Stop execution of loop
@@ -277,6 +277,7 @@ pub fn weekday_to_lowercase_str(weekday: &Weekday) -> &'static str {
 enum Sleeping {
     To(Instant),
     Wake,
+    Forever,
 }
 
 /// The handler's job is to handle [`Scheduler`]s and transitions.
@@ -321,22 +322,29 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                                 None => None,
                             }
                         }
+                        Sleeping::Forever => {
+                            thread::sleep(Duration::from_millis(1));
+                            continue;
+                        }
                         Sleeping::Wake => None,
                     },
                 };
                 let action = state.process(command);
                 match action {
-                    Action::Wait(dur) => {
-                        if enabled.map(|value| value < 0.01).unwrap_or(false) {
-                            output.disable();
-                            enabled = None;
-                        }
-                        match chrono::Duration::from_std(dur) {
+                    Action::Wait(sleep_time) => match sleep_time {
+                        scheduler::SleepTime::Duration(dur) => {
+                            if enabled.map(|value| value < 0.01).unwrap_or(false) {
+                                output.disable();
+                                enabled = None;
+                            }
+                            match chrono::Duration::from_std(dur) {
                                     Ok(dur) => println!("Sleeping to {:?}", get_naive_now() + dur),
                                     Err(_) => eprintln!("Sleeping to unknown date, failed to convert std::Duration to chrono::Duration when printing"),
                                 }
-                        sleeping = Sleeping::To(Instant::now() + dur)
-                    }
+                            sleeping = Sleeping::To(Instant::now() + dur)
+                        }
+                        scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
+                    },
                     Action::Set(s) => {
                         if enabled.unwrap_or(0.0) == 0.0 {
                             output.enable();

@@ -16,12 +16,17 @@ pub enum Keep {
     Keep,
     Remove,
 }
+pub enum Next {
+    Immediately(Command),
+    In(Duration, Command),
+    Unknown,
+}
 pub trait Scheduler: Debug + Send + Sync {
     /// Advances the internal state when the scheduled time in [`Scheduler::get_next()`] is reached.
     /// You can specify if you want to persist in the list of schedulers or be removed.
     fn advance(&mut self) -> Keep;
     /// Main function. It gets the time to the next occurrence of this Scheduler.
-    fn get_next(&self) -> (Duration, Command);
+    fn get_next(&self, include_immediate: bool) -> Next;
     /// A description to show the user. Should contain information about what this scheduler wakes up to do.
     /// Should only be used as a tip for users.
     fn description(&self) -> &str;
@@ -103,17 +108,11 @@ impl Scheduler for WeekScheduler {
         self.current = self.current.succ();
         Keep::Keep
     }
-    fn get_next(&self) -> (Duration, Command) {
+    fn get_next(&self, _: bool) -> Next {
         let now = get_naive_now();
         let next = match self.get_next_from_day(now.weekday()).map(|(t, _)| *t) {
             Some(t) => t,
-            None => {
-                // Will `Finish` after 1000 years.
-                return (
-                    Duration::from_secs(60 * 60 * 24 * 365 * 1000),
-                    Command::Finish,
-                );
-            }
+            None => return Next::Unknown,
         };
         let next = if now.time()
             < next
@@ -136,7 +135,7 @@ impl Scheduler for WeekScheduler {
             .expect("duration is negative")
             .checked_sub(self.transition.time)
             .unwrap_or(Duration::new(0, 0));
-        (
+        Next::In(
             next,
             Command::SetTransition(Transition::clone(&self.transition)),
         )
@@ -286,6 +285,8 @@ pub struct State {
     transition: Option<TransitionState>,
     last_instance: Instant,
     last_scheduler: Option<String>,
+    /// Used to start transition which hasn't finished after a restart.
+    revive: bool,
 }
 impl State {
     pub fn new(state: Arc<Mutex<SharedState>>) -> Self {
@@ -296,6 +297,7 @@ impl State {
             transition: None,
             last_instance: Instant::now(),
             last_scheduler: None,
+            revive: true,
         }
     }
 
@@ -418,26 +420,45 @@ impl State {
             None
         }
     }
-    fn queue_sleep(&mut self) -> Duration {
+    fn queue_sleep(&mut self) -> SleepTime {
         let (dur, cmd) = {
-            let lock = self.shared.lock().unwrap();
-            let next = lock
+            let mut lock = self.shared.lock().unwrap();
+            // Remove unneeded schedulers
+            lock.schedulers
+                .retain(|_name, s| !matches!(s.get_next(self.revive), Next::Unknown));
+
+            let schedulers_next = lock
                 .schedulers
                 .iter()
-                .map(|(_name, s)| s.get_next())
-                .min_by_key(|(d, _)| *d);
-            let (dur, cmd) = Scheduler::get_next(&lock.week_schedule);
-            match next {
-                Some((next_dur, next_cmd)) => match dur < next_dur {
-                    true => (dur, cmd),
-                    false => (next_dur, next_cmd),
+                .map(|(_name, s)| s.get_next(self.revive))
+                .min_by_key(|d| match d {
+                    Next::Immediately(_) => Duration::new(0, 0),
+                    Next::In(d, _) => *d,
+                    Next::Unknown => unreachable!(".retain() call above"),
+                });
+
+            let week_next = Scheduler::get_next(&lock.week_schedule, self.revive);
+            self.revive = false;
+            match week_next {
+                Next::Immediately(cmd) => (Duration::new(0, 0), cmd),
+                Next::In(week_dur, week_cmd) => match schedulers_next {
+                    Some(schedulers_next) => match schedulers_next {
+                        Next::Immediately(cmd) => (Duration::new(0, 0), cmd),
+                        Next::In(schedulers_dur, schedulers_cmd) => match schedulers_dur < week_dur
+                        {
+                            true => (schedulers_dur, schedulers_cmd),
+                            false => (week_dur, week_cmd),
+                        },
+                        Next::Unknown => unreachable!(".retain() call above"),
+                    },
+                    None => (week_dur, week_cmd),
                 },
-                None => (dur, cmd),
+                Next::Unknown => return SleepTime::Forever,
             }
         };
 
         self.wake_up = Some((Instant::now() + dur, cmd));
-        dur
+        SleepTime::Duration(dur)
     }
     fn get_next(&mut self) -> Action {
         match self.get_transition_output() {
