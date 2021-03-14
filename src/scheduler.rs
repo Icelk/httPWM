@@ -17,7 +17,6 @@ pub enum Keep {
     Remove,
 }
 pub enum Next {
-    Immediately(Command),
     In(Duration, Command),
     Unknown,
 }
@@ -26,7 +25,7 @@ pub trait Scheduler: Debug + Send + Sync {
     /// You can specify if you want to persist in the list of schedulers or be removed.
     fn advance(&mut self) -> Keep;
     /// Main function. It gets the time to the next occurrence of this Scheduler.
-    fn get_next(&self, include_immediate: bool) -> Next;
+    fn get_next(&self) -> Next;
     /// A description to show the user. Should contain information about what this scheduler wakes up to do.
     /// Should only be used as a tip for users.
     fn description(&self) -> &str;
@@ -108,7 +107,7 @@ impl Scheduler for WeekScheduler {
         self.current = self.current.succ();
         Keep::Keep
     }
-    fn get_next(&self, _: bool) -> Next {
+    fn get_next(&self) -> Next {
         // todo!("take immediate in consideration");
 
         let now = get_naive_now();
@@ -354,6 +353,7 @@ impl State {
                     self.get_next()
                 }
                 Command::SetTransition(transition) => {
+                    self.shared.lock().unwrap().transition = Transition::clone(&transition);
                     self.transition = Some(TransitionState::new(transition));
                     self.last_instance = Instant::now();
                     // unwrap() is ok; we've just set transition to be `Some`
@@ -427,25 +427,22 @@ impl State {
             let mut lock = self.shared.lock().unwrap();
             // Remove unneeded schedulers
             lock.schedulers
-                .retain(|_name, s| !matches!(s.get_next(self.revive), Next::Unknown));
+                .retain(|_name, s| !matches!(s.get_next(), Next::Unknown));
 
             let schedulers_next = lock
                 .schedulers
                 .iter()
-                .map(|(_name, s)| s.get_next(self.revive))
+                .map(|(_name, s)| s.get_next())
                 .min_by_key(|d| match d {
-                    Next::Immediately(_) => Duration::new(0, 0),
                     Next::In(d, _) => *d,
                     Next::Unknown => unreachable!(".retain() call above"),
                 });
 
-            let week_next = Scheduler::get_next(&lock.week_schedule, self.revive);
+            let week_next = Scheduler::get_next(&lock.week_schedule);
             self.revive = false;
             match week_next {
-                Next::Immediately(cmd) => (Duration::new(0, 0), cmd),
                 Next::In(week_dur, week_cmd) => match schedulers_next {
                     Some(schedulers_next) => match schedulers_next {
-                        Next::Immediately(cmd) => (Duration::new(0, 0), cmd),
                         Next::In(schedulers_dur, schedulers_cmd) => match schedulers_dur < week_dur
                         {
                             true => (schedulers_dur, schedulers_cmd),

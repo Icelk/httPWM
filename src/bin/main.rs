@@ -21,12 +21,7 @@ fn main() {
     let pwm = PrintOut;
 
     let time = chrono::NaiveTime::from_hms(07, 00, 00);
-    let day_transition = Transition {
-        from: Strength::new(0.0),
-        to: Strength::new(1.0),
-        time: Duration::from_secs(15 * 60),
-        interpolation: TransitionInterpolation::SineToAndBack(0.5),
-    };
+    let day_transition = Transition::default();
     let startup_transition = Transition {
         from: Strength::new(0.0),
         to: Strength::new(1.0),
@@ -189,8 +184,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
             .map(|(name, scheduler)| {
                 (
                     SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string()),
-                    match scheduler.get_next(false) {
-                        Next::Immediately(_) => Some(Duration::new(0, 0)),
+                    match scheduler.get_next() {
                         Next::In(dur, _) => Some(dur),
                         Next::Unknown => None,
                     },
@@ -232,8 +226,33 @@ pub fn parse_time(string: &str) -> Option<chrono::NaiveTime> {
         .ok()
 }
 
+mod save_state {
+    use super::*;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct WeekSchedulerData {
+        pub mon: Option<String>,
+        pub tue: Option<String>,
+        pub wed: Option<String>,
+        pub thu: Option<String>,
+        pub fri: Option<String>,
+        pub sat: Option<String>,
+        pub sun: Option<String>,
+        pub transition: TransitionData,
+    }
+    pub struct DataWrapper(Data, bool);
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Data {
+        strength: f64,
+        schedulers: Vec<AddSchedulerData>,
+        week_scheduler: WeekSchedulerData,
+        current_transition: TransitionData,
+    }
+}
+
 #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct DayData {
+pub struct DayData {
     day: String,
     time: Option<String>,
 }
@@ -249,7 +268,7 @@ impl DayData {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct TransitionData {
+pub struct TransitionData {
     from: f64,
     to: f64,
     time: f64,
@@ -287,7 +306,7 @@ impl TransitionData {
 }
 
 #[derive(Debug, Serialize)]
-struct StateData {
+pub struct StateData {
     strength: f64,
     days: HashMap<String, Option<String>>,
     transition: TransitionData,
@@ -366,7 +385,7 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for At {
-        fn get_next(&self, _: bool) -> Next {
+        fn get_next(&self) -> Next {
             let now = get_naive_now();
             Next::In(
                 (self.moment - now).to_std().unwrap_or(Duration::new(0, 0)),
@@ -395,7 +414,7 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryWeek {
-        fn get_next(&self, _: bool) -> Next {
+        fn get_next(&self) -> Next {
             let now = get_naive_now();
             if self.day == now.weekday() && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
@@ -442,7 +461,7 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryDay {
-        fn get_next(&self, _: bool) -> Next {
+        fn get_next(&self) -> Next {
             let now = get_naive_now();
             if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
@@ -472,8 +491,8 @@ pub mod extra_schedulers {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct AddSchedulerData {
+#[derive(Debug, Deserialize, Serialize)]
+pub struct AddSchedulerData {
     kind: String,
     time: String,
     name: String,
@@ -507,7 +526,7 @@ impl AddSchedulerData {
     }
 }
 #[derive(Debug, Serialize)]
-struct SchedulerData {
+pub struct SchedulerData {
     name: String,
     description: String,
     kind: String,
@@ -515,7 +534,7 @@ struct SchedulerData {
 }
 impl SchedulerData {
     pub fn from_scheduler(scheduler: &dyn Scheduler, name: String) -> Self {
-        let dur = scheduler.get_next(false);
+        let dur = scheduler.get_next();
 
         let next_occurrence = match dur {
             Next::In(dur, _) => {
@@ -532,7 +551,6 @@ impl SchedulerData {
                     format!("In {} seconds", dur.num_seconds())
                 }
             }
-            Next::Immediately(_) => "immediately".to_string(),
             Next::Unknown => "unknown".to_string(),
         };
 

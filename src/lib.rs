@@ -90,7 +90,7 @@ impl Default for Transition {
             from: Strength::new(0.0),
             to: Strength::new(1.0),
             time: Duration::from_secs(15 * 60),
-            interpolation: TransitionInterpolation::LinearToAndBack(0.5),
+            interpolation: TransitionInterpolation::SineToAndBack(0.5),
         }
     }
 }
@@ -238,6 +238,7 @@ pub fn get_naive_now() -> chrono::NaiveDateTime {
 #[derive(Debug)]
 pub struct SharedState {
     strength: Strength,
+    transition: Transition,
     week_schedule: WeekScheduler,
     schedulers: HashMap<String, Box<dyn Scheduler>>,
 }
@@ -245,6 +246,7 @@ impl SharedState {
     pub fn new(scheduler: WeekScheduler) -> Self {
         Self {
             strength: Strength::new(0.0),
+            transition: Transition::default(),
             week_schedule: scheduler,
             schedulers: HashMap::new(),
         }
