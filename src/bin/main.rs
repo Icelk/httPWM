@@ -181,7 +181,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
 
     let local_state = state();
     bindings.bind_page("/get-schedulers", move |buffer, _, _| {
-        let mut schedulers: Vec<(SchedulerData, Duration)> = local_state
+        let mut schedulers: Vec<(SchedulerData, Option<Duration>)> = local_state
             .lock()
             .unwrap()
             .get_schedulers()
@@ -189,7 +189,11 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
             .map(|(name, scheduler)| {
                 (
                     SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string()),
-                    scheduler.get_next().0,
+                    match scheduler.get_next(false) {
+                        Next::Immediately(_) => Some(Duration::new(0, 0)),
+                        Next::In(dur, _) => Some(dur),
+                        Next::Unknown => None,
+                    },
                 )
             })
             .collect();
@@ -362,9 +366,9 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for At {
-        fn get_next(&self) -> (Duration, Command) {
+        fn get_next(&self, _: bool) -> Next {
             let now = get_naive_now();
-            (
+            Next::In(
                 (self.moment - now).to_std().unwrap_or(Duration::new(0, 0)),
                 self.common.get_command().into_inner(),
             )
@@ -391,11 +395,11 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryWeek {
-        fn get_next(&self) -> (Duration, Command) {
+        fn get_next(&self, _: bool) -> Next {
             let now = get_naive_now();
             if self.day == now.weekday() && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
-                (
+                Next::In(
                     (self.time - now.time()).to_std().unwrap(),
                     self.common.get_command().into_inner(),
                 )
@@ -414,7 +418,7 @@ pub mod extra_schedulers {
                     - now)
                     .to_std()
                     .unwrap();
-                (dur, self.common.get_command().into_inner())
+                Next::In(dur, self.common.get_command().into_inner())
             }
         }
         fn advance(&mut self) -> Keep {
@@ -438,17 +442,17 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryDay {
-        fn get_next(&self) -> (Duration, Command) {
+        fn get_next(&self, _: bool) -> Next {
             let now = get_naive_now();
             if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
-                (
+                Next::In(
                     (self.time - now.time()).to_std().unwrap(),
                     self.common.get_command().into_inner(),
                 )
             } else {
                 // Unwrap is OK, it's one day ahead!
-                (
+                Next::In(
                     ((self.time - now.time()) + chrono::Duration::days(1))
                         .to_std()
                         .unwrap(),
@@ -511,18 +515,25 @@ struct SchedulerData {
 }
 impl SchedulerData {
     pub fn from_scheduler(scheduler: &dyn Scheduler, name: String) -> Self {
-        let dur =
-            chrono::Duration::from_std(scheduler.get_next().0).expect("std duration overflowed!");
-        let next_occurrence = if dur.num_days() > 0 {
-            (get_naive_now() + dur)
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string()
-        } else if dur.num_hours() > 0 {
-            format!("In {} hours", dur.num_hours())
-        } else if dur.num_minutes() > 0 {
-            format!("In {} minutes", dur.num_minutes())
-        } else {
-            format!("In {} seconds", dur.num_seconds())
+        let dur = scheduler.get_next(false);
+
+        let next_occurrence = match dur {
+            Next::In(dur, _) => {
+                let dur = chrono::Duration::from_std(dur).expect("std duration overflowed!");
+                if dur.num_days() > 0 {
+                    (get_naive_now() + dur)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                } else if dur.num_hours() > 0 {
+                    format!("In {} hours", dur.num_hours())
+                } else if dur.num_minutes() > 0 {
+                    format!("In {} minutes", dur.num_minutes())
+                } else {
+                    format!("In {} seconds", dur.num_seconds())
+                }
+            }
+            Next::Immediately(_) => "immediately".to_string(),
+            Next::Unknown => "unknown".to_string(),
         };
 
         // let next_occurrence = (chrono::Local::now()

@@ -2,7 +2,7 @@ pub mod scheduler;
 
 use chrono::prelude::*;
 use rppal::{gpio::OutputPin, pwm::Pwm};
-pub use scheduler::{Scheduler, WeekScheduler};
+pub use scheduler::{Next, Scheduler, WeekScheduler};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use std::{

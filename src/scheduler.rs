@@ -109,6 +109,8 @@ impl Scheduler for WeekScheduler {
         Keep::Keep
     }
     fn get_next(&self, _: bool) -> Next {
+        // todo!("take immediate in consideration");
+
         let now = get_naive_now();
         let next = match self.get_next_from_day(now.weekday()).map(|(t, _)| *t) {
             Some(t) => t,
