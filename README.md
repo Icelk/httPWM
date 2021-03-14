@@ -9,7 +9,7 @@ It's goal is to enable software control over PWM output on the Raspberry Pi,
 either through the hardware `PWM channels` or through `software PWM`.
 
 The backend event-loop and scheduler handling is the core part, and can be used without `Kvarn` and other binary dependencies.
-If you want to use only the library, check out <src/bin/main> for a implementation and make sure to disable default features in your `Cargo.toml`.
+If you want to use only the library, check out [main.rs](src/bin/main.rs) for a implementation and make sure to disable default features in your `Cargo.toml`.
 
 
 # State of project
