@@ -1,5 +1,5 @@
+use httpwm::*;
 use kvarn::prelude::*;
-use pwm_dev::*;
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{Arc, Mutex},
@@ -312,7 +312,7 @@ impl StateData {
 }
 pub mod extra_schedulers {
     use chrono::Datelike;
-    use pwm_dev::scheduler::Keep;
+    use httpwm::scheduler::Keep;
 
     use super::*;
 

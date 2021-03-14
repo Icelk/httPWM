@@ -3,7 +3,7 @@ Description=HTTP light service
 
 [Service]
 Type=simple
-ExecStart=sh -c "sleep 4; cd pwm_dev; ~/.cargo/bin/pwm_http"
+ExecStart=sh -c "sleep 4; cd httPWM; ~/.cargo/bin/httpwmd"
 
 [Install]
 WantedBy=default.target

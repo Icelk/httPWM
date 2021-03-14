@@ -1,5 +1,5 @@
 [package]
-name = "pwm_dev"
+name = "httpwm"
 version = "0.1.0"
 authors = ["Icelk <main@icelk.dev>"]
 edition = "2018"
@@ -7,13 +7,13 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "pwm_http"
+name = "httpwmd"
 path = "src/bin/main.rs"
-doc = false
+doc = true
 required-features = ["bin"]
 
 [lib]
-name = "pwm_dev"
+name = "httpwm"
 
 [dependencies]
 rppal = "0.11.3"
