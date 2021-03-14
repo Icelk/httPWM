@@ -37,8 +37,8 @@ window.addEventListener("unhandledrejection", (message) => {
 
 
 let currentNotification = null;
-const notificationInfo = "var(--bg-second)";
-const notificationError = "var(--error)";
+const notificationInfo = "#2f5faf9f";
+const notificationError = "#8c1c2e9f";
 const notificationTransform = "translateX(calc(200% + 2em))";
 let notificationTimeout = 5000;
 function sendNotification(message, color) {
