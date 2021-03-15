@@ -335,7 +335,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 match action {
                     Action::Wait(sleep_time) => match sleep_time {
                         scheduler::SleepTime::Duration(dur) => {
-                            if enabled.map(|value| value < 0.01).unwrap_or(false) {
+                            if enabled.map(|value| value == 0.0).unwrap_or(false) {
                                 output.disable();
                                 enabled = None;
                             }
