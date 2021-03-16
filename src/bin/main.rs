@@ -436,7 +436,6 @@ pub mod save_state {
         }
         /// Returns mutable reference to inner [`Data`].
         /// Sets internal `save` bool true.
-        /// Make sure to use [`DataWrapper::clear_transitions()`] instead of [`Data::clear_transitions()`]
         pub fn get_mut(&mut self) -> &mut Data {
             self.1 = true;
             &mut self.0
@@ -476,9 +475,6 @@ pub mod save_state {
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             }
             read(path.as_ref()).map(|mut data| {
-                // if data.strength.is_none(){
-                //     data.strength = Some(Strength::new(0.0));
-                // }
                 if data.week_scheduler.is_none() {
                     data.week_scheduler = Some(WeekSchedulerData::from_scheduler(week_scheduler));
                 }
@@ -537,9 +533,6 @@ pub mod save_state {
         pub fn set_transition(&mut self, new: &Transition) -> Option<TransitionData> {
             self.current_transition
                 .replace(TransitionData::from_transition(new))
-        }
-        pub fn clear_transition(&mut self) -> Option<TransitionData> {
-            self.current_transition.take()
         }
     }
 }
