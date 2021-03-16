@@ -252,6 +252,11 @@ impl SharedState {
         }
     }
 
+    pub fn set_strength(&mut self, strength: Strength) {
+        self.strength = strength;
+        self.transition = None;
+    }
+
     pub fn get_week_schedule(&self) -> &WeekScheduler {
         &self.week_schedule
     }

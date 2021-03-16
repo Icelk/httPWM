@@ -43,14 +43,13 @@ pub struct WeekScheduler {
     pub fri: Option<NaiveTime>,
     pub sat: Option<NaiveTime>,
     pub sun: Option<NaiveTime>,
-    current: Weekday,
     pub transition: Transition,
 }
 impl WeekScheduler {
     pub fn empty(transition: Transition) -> Self {
-        Self::same_with_day(Local::today().weekday(), None, transition)
+        Self::same_with_day(None, transition)
     }
-    fn same_with_day(day: Weekday, time: Option<NaiveTime>, transition: Transition) -> Self {
+    fn same_with_day(time: Option<NaiveTime>, transition: Transition) -> Self {
         Self {
             mon: time,
             tue: time,
@@ -59,13 +58,12 @@ impl WeekScheduler {
             fri: time,
             sat: time,
             sun: time,
-            current: day,
             transition,
         }
     }
 
     pub fn same(time: NaiveTime, transition: Transition) -> Self {
-        Self::same_with_day(Local::today().weekday(), Some(time), transition)
+        Self::same_with_day(Some(time), transition)
     }
 
     pub fn get_next_from_day(&self, day: Weekday) -> Option<(&NaiveTime, u8)> {
@@ -104,7 +102,6 @@ impl WeekScheduler {
 }
 impl Scheduler for WeekScheduler {
     fn advance(&mut self) -> Keep {
-        self.current = self.current.succ();
         Keep::Keep
     }
     fn get_next(&self) -> Next {
@@ -319,7 +316,10 @@ impl State {
                 Command::Set(strength) => {
                     // clear animation
                     self.transition = None;
-                    self.shared.lock().unwrap().strength = Strength::clone(&strength);
+                    self.shared
+                        .lock()
+                        .unwrap()
+                        .set_strength(Strength::clone(&strength));
                     // send back set
                     Action::Set(strength)
                 }
@@ -412,11 +412,10 @@ impl State {
             let transition = self.transition.as_mut().unwrap();
             match transition.process(&delta_time) {
                 TransitionStateOut::Finished(s) => {
-                    {
-                        let mut lock = self.shared.lock().unwrap();
-                        lock.strength = Strength::clone(&s);
-                        lock.transition = None;
-                    }
+                    self.shared
+                        .lock()
+                        .unwrap()
+                        .set_strength(Strength::clone(&s));
                     self.transition = None;
                     Some(s)
                 }

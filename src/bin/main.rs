@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::Write,
     sync::{Arc, Mutex},
+    thread,
     time::Duration,
 };
 
@@ -25,21 +26,99 @@ fn main() {
 
     let time = chrono::NaiveTime::from_hms(07, 00, 00);
     let day_transition = Transition::default();
+
+    let startup_multiplier = Some(0.5);
+    let startup_duration = 1.0;
     let startup_transition = Transition {
         from: Strength::new(0.0),
         to: Strength::new(1.0),
-        time: Duration::from_millis(1000),
-        interpolation: TransitionInterpolation::SineToAndBack(0.5),
+        time: Duration::from_secs_f64(startup_duration),
+        interpolation: TransitionInterpolation::SineToAndBack(startup_multiplier.unwrap()),
     };
 
     let scheduler = scheduler::WeekScheduler::same(time, day_transition);
-    let controller = Controller::new(pwm, scheduler);
+
+    let (saved_state, week_scheduler) = {
+        let saved_state = save_state::Data::read_from_file(SAVE_PATH, &scheduler);
+
+        match saved_state.ok().and_then(|state| {
+            state
+                .ref_week_scheduler()
+                .to_scheduler()
+                .map(|scheduler| (scheduler, state))
+        }) {
+            Some((scheduler, data)) => (save_state::DataWrapper::new(data), scheduler),
+            None => (
+                save_state::DataWrapper::new(save_state::Data::from_week_scheduler(&scheduler)),
+                scheduler,
+            ),
+        }
+    };
+    let controller = Controller::new(pwm, week_scheduler);
 
     controller.send(Command::SetTransition(startup_transition));
 
-    let controller = Arc::new(Mutex::new(controller));
+    let shared = controller.get_state();
 
-    create_server(controller).run();
+    let controller = Arc::new(Mutex::new(controller));
+    let saved_state = Arc::new(Mutex::new(saved_state));
+    {
+        let shared = Arc::clone(&shared);
+        let saved = Arc::clone(&saved_state);
+        let controller = Arc::clone(&controller);
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs_f64(
+                startup_duration * (startup_multiplier.unwrap_or(0.0) + 1.0),
+            ));
+            saved
+                .lock()
+                .unwrap()
+                .get_ref()
+                .apply(&*controller.lock().unwrap());
+
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_millis(100));
+                let mut state = saved.lock().unwrap();
+
+                {
+                    match shared.lock().unwrap().get_transition() {
+                        Some(transition) => state.get_mut().set_transition(transition),
+                        None => state.clear_transition(),
+                    }
+                };
+
+                if state.save() {
+                    println!("Saving state!");
+                    let data = {
+                        let config = ron::ser::PrettyConfig::default()
+                            .with_enumerate_arrays(true)
+                            .with_decimal_floats(true);
+                        match ron::ser::to_string_pretty(state.get_ref(), config) {
+                            Err(err) => {
+                                eprintln!("Failed to save state {}", err);
+                                continue;
+                            }
+                            Ok(s) => s,
+                        }
+                    };
+                    drop(state);
+
+                    let mut file = match fs::File::create(SAVE_PATH) {
+                        Err(err) => {
+                            eprintln!("Failed to create file {}", err);
+                            continue;
+                        }
+                        Ok(f) => f,
+                    };
+                    if let Err(err) = file.write_all(data.as_bytes()) {
+                        eprintln!("Failed to write data to file {}", err);
+                    }
+                }
+            });
+        });
+    }
+
+    create_server(controller, saved_state, shared).run();
 }
 
 fn get_query_value<'a>(
@@ -61,61 +140,17 @@ fn get_query_value<'a>(
     }
 }
 
-fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -> kvarn::Config {
+fn create_server<T: VariableOut + Send>(
+    controller: Arc<Mutex<Controller<T>>>,
+    save_state: Arc<Mutex<save_state::DataWrapper>>,
+    shared: Arc<Mutex<SharedState>>,
+) -> kvarn::Config {
     let mut bindings = FunctionBindings::new();
 
-    let state = {
-        let state = controller.lock().unwrap().get_state();
-        move || Arc::clone(&state)
-    };
+    let state = { move || Arc::clone(&shared) };
     let ctl = move || Arc::clone(&controller);
 
-    let saved_state = save_state::DataWrapper::new(save_state::Data::read_from_file(
-        SAVE_PATH,
-        state().lock().unwrap().get_week_schedule(),
-    ));
-    let saved_state = Arc::new(Mutex::new(saved_state));
-    {
-        let saved_state = Arc::clone(&saved_state);
-        let shared = state();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(1000));
-            let mut state = saved_state.lock().unwrap();
-
-            if state.do_save() {
-                {
-                    match shared.lock().unwrap().get_transition() {
-                        Some(transition) => state.get_mut().set_transition(transition),
-                        None => state.get_mut().clear_transition(),
-                    }
-                };
-                let data = {
-                    let config = ron::ser::PrettyConfig::default();
-                    match ron::ser::to_string_pretty(state.get_ref(), config) {
-                        Err(err) => {
-                            eprintln!("Failed to save state {}", err);
-                            continue;
-                        }
-                        Ok(s) => s,
-                    }
-                };
-                drop(state);
-
-                let mut file = match fs::File::create(SAVE_PATH) {
-                    Err(err) => {
-                        eprintln!("Failed to create file {}", err);
-                        continue;
-                    }
-                    Ok(f) => f,
-                };
-                if let Err(err) = file.write_all(data.as_bytes()) {
-                    eprintln!("Failed to write data to file {}", err);
-                }
-                saved_state.lock().unwrap().saved();
-            }
-        });
-    }
-    let saved = move || Arc::clone(&saved_state);
+    let saved = move || Arc::clone(&save_state);
 
     let controller = ctl();
     let save = saved();
@@ -367,6 +402,29 @@ pub mod save_state {
                 transition: TransitionData::from_transition(&scheduler.transition),
             }
         }
+        pub fn to_scheduler(&self) -> Option<WeekScheduler> {
+            macro_rules! fmt_time {
+                ($e:expr) => {
+                    match $e.as_ref() {
+                        Some(time) => Some(
+                            chrono::NaiveTime::parse_from_str(time.as_str(), "%H:%M:%S").ok()?,
+                        ),
+                        None => None,
+                    }
+                };
+            };
+
+            Some(WeekScheduler {
+                mon: fmt_time!(self.mon),
+                tue: fmt_time!(self.tue),
+                wed: fmt_time!(self.wed),
+                thu: fmt_time!(self.thu),
+                fri: fmt_time!(self.fri),
+                sat: fmt_time!(self.sat),
+                sun: fmt_time!(self.sun),
+                transition: self.transition.to_transition()?,
+            })
+        }
     }
     pub struct DataWrapper(Data, bool);
     impl DataWrapper {
@@ -378,15 +436,25 @@ pub mod save_state {
         }
         /// Returns mutable reference to inner [`Data`].
         /// Sets internal `save` bool true.
+        /// Make sure to use [`DataWrapper::clear_transitions()`] instead of [`Data::clear_transitions()`]
         pub fn get_mut(&mut self) -> &mut Data {
             self.1 = true;
             &mut self.0
         }
-        pub fn do_save(&self) -> bool {
-            self.1
+        /// Will clear the inner transition and only set inner `save` flag to true if a value is returned.
+        pub fn clear_transition(&mut self) -> Option<TransitionData> {
+            match self.0.current_transition.take() {
+                Some(took) => {
+                    self.1 = true;
+                    Some(took)
+                }
+                None => None,
+            }
         }
-        pub fn saved(&mut self) {
-            self.1 = true;
+        pub fn save(&mut self) -> bool {
+            let save = self.1;
+            self.1 = false;
+            save
         }
     }
 
@@ -398,31 +466,54 @@ pub mod save_state {
         current_transition: Option<TransitionData>,
     }
     impl Data {
-        pub fn read_from_file<P: AsRef<Path>>(path: P, week_scheduler: &WeekScheduler) -> Self {
+        pub fn read_from_file<P: AsRef<Path>>(
+            path: P,
+            week_scheduler: &WeekScheduler,
+        ) -> io::Result<Self> {
             fn read(path: &Path) -> io::Result<Data> {
                 let file = fs::File::open(path)?;
                 ron::de::from_reader(file)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             }
-            match read(path.as_ref()) {
-                Ok(mut data) => {
-                    // if data.strength.is_none(){
-                    //     data.strength = Some(Strength::new(0.0));
-                    // }
-                    if data.week_scheduler.is_none() {
-                        data.week_scheduler =
-                            Some(WeekSchedulerData::from_scheduler(week_scheduler));
-                    }
-                    data
+            read(path.as_ref()).map(|mut data| {
+                // if data.strength.is_none(){
+                //     data.strength = Some(Strength::new(0.0));
+                // }
+                if data.week_scheduler.is_none() {
+                    data.week_scheduler = Some(WeekSchedulerData::from_scheduler(week_scheduler));
                 }
-                Err(_) => Self {
-                    strength: None,
-                    schedulers: Vec::new(),
-                    week_scheduler: Some(WeekSchedulerData::from_scheduler(week_scheduler)),
-                    current_transition: None,
-                },
+                data
+            })
+        }
+        pub fn from_week_scheduler(scheduler: &WeekScheduler) -> Self {
+            Self {
+                strength: None,
+                schedulers: Vec::new(),
+                week_scheduler: Some(WeekSchedulerData::from_scheduler(scheduler)),
+                current_transition: None,
             }
         }
+
+        pub fn apply<T: VariableOut + Send>(&self, controller: &Controller<T>) {
+            if let Some(s) = self.strength {
+                controller.send(Command::Set(Strength::new_clamped(s)));
+            }
+            for scheduler in self
+                .schedulers
+                .iter()
+                .filter_map(|s| s.clone().into_command())
+            {
+                controller.send(scheduler);
+            }
+            if let Some(transition) = self
+                .current_transition
+                .as_ref()
+                .and_then(TransitionData::to_transition)
+            {
+                controller.send(Command::SetTransition(transition));
+            }
+        }
+
         pub fn set_strength(&mut self, strength: Strength) -> Option<Strength> {
             self.strength
                 .replace(strength.into_inner())
@@ -430,6 +521,10 @@ pub mod save_state {
         }
         pub fn mut_schedulers(&mut self) -> &mut Vec<AddSchedulerData> {
             &mut self.schedulers
+        }
+        pub fn ref_week_scheduler(&self) -> &WeekSchedulerData {
+            // ok, since it must be `Some`, it's just an option for parsing from file.
+            self.week_scheduler.as_ref().unwrap()
         }
         pub fn mut_week_scheduler(&mut self) -> &mut WeekSchedulerData {
             // ok, since it must be `Some`, it's just an option for parsing from file.
@@ -474,7 +569,7 @@ pub struct TransitionData {
     extras: Vec<String>,
 }
 impl TransitionData {
-    pub fn to_transition(self) -> Option<Transition> {
+    pub fn to_transition(&self) -> Option<Transition> {
         let from = Strength::new_clamped(self.from);
         let to = Strength::new_clamped(self.to);
         let time = Duration::from_secs_f64(self.time);
