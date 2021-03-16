@@ -203,12 +203,19 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     let controller = ctl();
     bindings.bind_page("/remove-scheduler", move |buffer, req, cache| {
         get_query_value(req, buffer, cache, "name").map(|name| {
+            match percent_encoding::percent_decode_str(name).decode_utf8() {
+                Ok(s) => {
             controller
                 .lock()
                 .unwrap()
-                .send(Command::RemoveScheduler(name.to_string()))
+                        .send(Command::RemoveScheduler(s.to_string()));
+                }
+                Err(_) => {
+                    utility::write_error(buffer, 400, cache);
+                }
+            };
         });
-        (utility::ContentType::PlainText, Cached::Dynamic)
+        (utility::ContentType::Html, Cached::Dynamic)
     });
 
     let localhost = Host::no_certification("web", Some(bindings));
