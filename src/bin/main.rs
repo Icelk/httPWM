@@ -2,9 +2,12 @@ use httpwm::*;
 use kvarn::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
+    io::Write,
     sync::{Arc, Mutex},
     time::Duration,
 };
+
+const SAVE_PATH: &'static str = "state.ron";
 
 fn main() {
     #[cfg(not(feature = "test"))]
@@ -67,16 +70,66 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     };
     let ctl = move || Arc::clone(&controller);
 
+    let saved_state = save_state::DataWrapper::new(save_state::Data::read_from_file(
+        SAVE_PATH,
+        state().lock().unwrap().get_week_schedule(),
+    ));
+    let saved_state = Arc::new(Mutex::new(saved_state));
+    {
+        let saved_state = Arc::clone(&saved_state);
+        let shared = state();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(1000));
+            let mut state = saved_state.lock().unwrap();
+
+            if state.do_save() {
+                {
+                    match shared.lock().unwrap().get_transition() {
+                        Some(transition) => state.get_mut().set_transition(transition),
+                        None => state.get_mut().clear_transition(),
+                    }
+                };
+                let data = {
+                    let config = ron::ser::PrettyConfig::default();
+                    match ron::ser::to_string_pretty(state.get_ref(), config) {
+                        Err(err) => {
+                            eprintln!("Failed to save state {}", err);
+                            continue;
+                        }
+                        Ok(s) => s,
+                    }
+                };
+                drop(state);
+
+                let mut file = match fs::File::create(SAVE_PATH) {
+                    Err(err) => {
+                        eprintln!("Failed to create file {}", err);
+                        continue;
+                    }
+                    Ok(f) => f,
+                };
+                if let Err(err) = file.write_all(data.as_bytes()) {
+                    eprintln!("Failed to write data to file {}", err);
+                }
+                saved_state.lock().unwrap().saved();
+            }
+        });
+    }
+    let saved = move || Arc::clone(&saved_state);
+
     let controller = ctl();
+    let save = saved();
     bindings.bind_page("/clear-schedulers", move |_, _, _| {
         {
             controller.lock().unwrap().send(Command::ClearAllSchedulers);
         }
+        save.lock().unwrap().get_mut().mut_schedulers().clear();
 
         (utility::ContentType::PlainText, Cached::Dynamic)
     });
 
     let controller = ctl();
+    let save = saved();
     bindings.bind_page("/set-strength", move |buffer, req, cache| {
         get_query_value(req, buffer, cache, "strength")
             .and_then(|value| value.parse().ok())
@@ -84,22 +137,35 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
                 controller
                     .lock()
                     .unwrap()
-                    .send(Command::Set(Strength::new_clamped(f)))
+                    .send(Command::Set(Strength::new_clamped(f)));
+                save.lock()
+                    .unwrap()
+                    .get_mut()
+                    .set_strength(Strength::new_clamped(f));
             });
         (utility::ContentType::Html, Cached::Dynamic)
     });
     let controller = ctl();
+    let save = saved();
     bindings.bind_page("/set-day-time", move |buffer, req, cache| {
-        let command = serde_json::from_slice(req.body())
-            .ok()
-            .and_then(|set_day: DayData| set_day.to_command());
+        let day_data = serde_json::from_slice(req.body()).ok();
+        let command = day_data
+            .as_ref()
+            .and_then(|set_day: &DayData| set_day.to_command());
 
         match command {
             Some(command) => {
                 println!("Changed time of day to {:?}", command);
                 {
-                    controller.lock().unwrap().send(command);
+                    let lock = controller.lock().unwrap();
+                    lock.send(command);
                 }
+
+                let mut save = save.lock().unwrap();
+                let week_scheduler = save.get_mut().mut_week_scheduler();
+                // unwrap is ok, they are already parsed ↑
+                let day_data = day_data.as_ref().unwrap();
+                *week_scheduler.get_mut(day_data.day.parse().unwrap()) = day_data.time.clone();
             }
             None => {
                 utility::write_error(buffer, 400, cache);
@@ -109,6 +175,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     });
 
     let controller = ctl();
+    let save = saved();
     bindings.bind_page("/transition", move |buffer, req, cache| {
         let queries = req.uri().query().map(|q| parse::format_query(q));
         let action = queries.as_ref().and_then(|q| q.get("action")).map(|a| *a);
@@ -117,7 +184,7 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
             .ok()
             .and_then(|set_transition: TransitionData| set_transition.to_transition());
         let transition = match transition {
-            Some(command) => command,
+            Some(transition) => transition,
             None => {
                 utility::write_error(buffer, 400, cache);
                 return (utility::ContentType::Html, Cached::Dynamic);
@@ -126,6 +193,11 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
 
         match action {
             Some("set") => {
+                save.lock()
+                    .unwrap()
+                    .get_mut()
+                    .mut_week_scheduler()
+                    .transition = TransitionData::from_transition(&transition);
                 println!("Setting default transition.");
                 {
                     controller
@@ -159,13 +231,21 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     });
 
     let controller = ctl();
+    let save = saved();
     bindings.bind_page("/add-scheduler", move |buffer, req, cache| {
-        let command = serde_json::from_slice(req.body())
-            .ok()
-            .and_then(|data: AddSchedulerData| data.to_command());
+        let data = serde_json::from_slice(req.body()).ok();
+        let command = data.and_then(|data: AddSchedulerData| {
+            let data_clone = data.clone();
+            data.into_command().map(|cmd| (data_clone, cmd))
+        });
 
         match command {
-            Some(command) => controller.lock().unwrap().send(command),
+            Some((data, cmd)) => {
+                {
+                    controller.lock().unwrap().send(cmd);
+                }
+                save.lock().unwrap().get_mut().mut_schedulers().push(data);
+            }
             None => {
                 utility::write_error(buffer, 400, cache);
             }
@@ -201,14 +281,22 @@ fn create_server<T: VariableOut + Send>(controller: Arc<Mutex<Controller<T>>>) -
     });
 
     let controller = ctl();
+    let save = saved();
     bindings.bind_page("/remove-scheduler", move |buffer, req, cache| {
         get_query_value(req, buffer, cache, "name").map(|name| {
             match percent_encoding::percent_decode_str(name).decode_utf8() {
                 Ok(s) => {
-            controller
-                .lock()
-                .unwrap()
-                        .send(Command::RemoveScheduler(s.to_string()));
+                    {
+                        controller
+                            .lock()
+                            .unwrap()
+                            .send(Command::RemoveScheduler(s.to_string()));
+                    }
+                    save.lock()
+                        .unwrap()
+                        .get_mut()
+                        .mut_schedulers()
+                        .retain(|scheduler| scheduler.name != s);
                 }
                 Err(_) => {
                     utility::write_error(buffer, 400, cache);
@@ -233,8 +321,10 @@ pub fn parse_time(string: &str) -> Option<chrono::NaiveTime> {
         .ok()
 }
 
-mod save_state {
+/// Quite nasty code
+pub mod save_state {
     use super::*;
+    use chrono::Weekday;
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct WeekSchedulerData {
@@ -247,14 +337,115 @@ mod save_state {
         pub sun: Option<String>,
         pub transition: TransitionData,
     }
+    impl WeekSchedulerData {
+        pub fn get_mut(&mut self, day: Weekday) -> &mut Option<String> {
+            match day {
+                Weekday::Mon => &mut self.mon,
+                Weekday::Tue => &mut self.tue,
+                Weekday::Wed => &mut self.wed,
+                Weekday::Thu => &mut self.thu,
+                Weekday::Fri => &mut self.fri,
+                Weekday::Sat => &mut self.sat,
+                Weekday::Sun => &mut self.sun,
+            }
+        }
+        pub fn from_scheduler(scheduler: &WeekScheduler) -> Self {
+            macro_rules! fmt_time {
+                ($e:expr) => {
+                    $e.map(|time| time.format("%H:%M:%S").to_string())
+                };
+            };
+
+            WeekSchedulerData {
+                mon: fmt_time!(scheduler.mon),
+                tue: fmt_time!(scheduler.tue),
+                wed: fmt_time!(scheduler.wed),
+                thu: fmt_time!(scheduler.thu),
+                fri: fmt_time!(scheduler.fri),
+                sat: fmt_time!(scheduler.sat),
+                sun: fmt_time!(scheduler.sun),
+                transition: TransitionData::from_transition(&scheduler.transition),
+            }
+        }
+    }
     pub struct DataWrapper(Data, bool);
+    impl DataWrapper {
+        pub fn new(data: Data) -> Self {
+            Self(data, false)
+        }
+        pub fn get_ref(&self) -> &Data {
+            &self.0
+        }
+        /// Returns mutable reference to inner [`Data`].
+        /// Sets internal `save` bool true.
+        pub fn get_mut(&mut self) -> &mut Data {
+            self.1 = true;
+            &mut self.0
+        }
+        pub fn do_save(&self) -> bool {
+            self.1
+        }
+        pub fn saved(&mut self) {
+            self.1 = true;
+        }
+    }
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Data {
-        strength: f64,
+        strength: Option<f64>,
         schedulers: Vec<AddSchedulerData>,
-        week_scheduler: WeekSchedulerData,
-        current_transition: TransitionData,
+        week_scheduler: Option<WeekSchedulerData>,
+        current_transition: Option<TransitionData>,
+    }
+    impl Data {
+        pub fn read_from_file<P: AsRef<Path>>(path: P, week_scheduler: &WeekScheduler) -> Self {
+            fn read(path: &Path) -> io::Result<Data> {
+                let file = fs::File::open(path)?;
+                ron::de::from_reader(file)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+            match read(path.as_ref()) {
+                Ok(mut data) => {
+                    // if data.strength.is_none(){
+                    //     data.strength = Some(Strength::new(0.0));
+                    // }
+                    if data.week_scheduler.is_none() {
+                        data.week_scheduler =
+                            Some(WeekSchedulerData::from_scheduler(week_scheduler));
+                    }
+                    data
+                }
+                Err(_) => Self {
+                    strength: None,
+                    schedulers: Vec::new(),
+                    week_scheduler: Some(WeekSchedulerData::from_scheduler(week_scheduler)),
+                    current_transition: None,
+                },
+            }
+        }
+        pub fn set_strength(&mut self, strength: Strength) -> Option<Strength> {
+            self.strength
+                .replace(strength.into_inner())
+                .map(|f| Strength::new_clamped(f))
+        }
+        pub fn mut_schedulers(&mut self) -> &mut Vec<AddSchedulerData> {
+            &mut self.schedulers
+        }
+        pub fn mut_week_scheduler(&mut self) -> &mut WeekSchedulerData {
+            // ok, since it must be `Some`, it's just an option for parsing from file.
+            self.week_scheduler.as_mut().unwrap()
+        }
+        pub fn set_week_scheduler(&mut self, new: &WeekScheduler) -> Option<WeekSchedulerData> {
+            self.week_scheduler
+                .replace(WeekSchedulerData::from_scheduler(new))
+        }
+        pub fn set_transition(&mut self, new: &Transition) -> Option<TransitionData> {
+            self.current_transition
+                .replace(TransitionData::from_transition(new))
+        }
+        pub fn clear_transition(&mut self) -> Option<TransitionData> {
+            self.current_transition.take()
+        }
     }
 }
 
@@ -264,9 +455,9 @@ pub struct DayData {
     time: Option<String>,
 }
 impl DayData {
-    pub fn to_command(self) -> Option<Command> {
+    pub fn to_command(&self) -> Option<Command> {
         let day: chrono::Weekday = self.day.parse().ok()?;
-        let time = match self.time {
+        let time = match self.time.as_ref() {
             Some(time) => Some(parse_time(&time)?),
             None => None,
         };
@@ -274,7 +465,7 @@ impl DayData {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct TransitionData {
     from: f64,
     to: f64,
@@ -498,7 +689,7 @@ pub mod extra_schedulers {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AddSchedulerData {
     kind: String,
     time: String,
@@ -508,7 +699,7 @@ pub struct AddSchedulerData {
     transition: TransitionData,
 }
 impl AddSchedulerData {
-    pub fn to_command(self) -> Option<Command> {
+    pub fn into_command(self) -> Option<Command> {
         let transition = self.transition.to_transition()?;
         let time = parse_time(&self.time)?;
         // Unwrap is ok, since we know `SetTransition` is clonable

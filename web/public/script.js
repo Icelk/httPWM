@@ -186,7 +186,6 @@ async function overrideSchedulerList() {
             let remove = document.createElement("a");
             remove.innerHTML = "X";
             remove.classList.add("remove-scheduler");
-            console.log(remove);
             remove.addEventListener("click", (t) => removeScheduler(t.target.nextSibling.wholeText));
             name.appendChild(remove);
         }

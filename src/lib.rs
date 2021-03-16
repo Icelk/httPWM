@@ -238,7 +238,7 @@ pub fn get_naive_now() -> chrono::NaiveDateTime {
 #[derive(Debug)]
 pub struct SharedState {
     strength: Strength,
-    transition: Transition,
+    transition: Option<Transition>,
     week_schedule: WeekScheduler,
     schedulers: HashMap<String, Box<dyn Scheduler>>,
 }
@@ -246,7 +246,7 @@ impl SharedState {
     pub fn new(scheduler: WeekScheduler) -> Self {
         Self {
             strength: Strength::new(0.0),
-            transition: Transition::default(),
+            transition: None,
             week_schedule: scheduler,
             schedulers: HashMap::new(),
         }
@@ -260,6 +260,9 @@ impl SharedState {
     }
     pub fn get_schedulers(&self) -> &HashMap<String, Box<dyn Scheduler>> {
         &self.schedulers
+    }
+    pub fn get_transition(&self) -> Option<&Transition> {
+        self.transition.as_ref()
     }
 }
 

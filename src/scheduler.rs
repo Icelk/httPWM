@@ -353,7 +353,7 @@ impl State {
                     self.get_next()
                 }
                 Command::SetTransition(transition) => {
-                    self.shared.lock().unwrap().transition = Transition::clone(&transition);
+                    self.shared.lock().unwrap().transition = Some(Transition::clone(&transition));
                     self.transition = Some(TransitionState::new(transition));
                     self.last_instance = Instant::now();
                     // unwrap() is ok; we've just set transition to be `Some`
@@ -412,7 +412,11 @@ impl State {
             let transition = self.transition.as_mut().unwrap();
             match transition.process(&delta_time) {
                 TransitionStateOut::Finished(s) => {
-                    self.shared.lock().unwrap().strength = Strength::clone(&s);
+                    {
+                        let mut lock = self.shared.lock().unwrap();
+                        lock.strength = Strength::clone(&s);
+                        lock.transition = None;
+                    }
                     self.transition = None;
                     Some(s)
                 }
