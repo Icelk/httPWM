@@ -226,7 +226,7 @@ impl VariableOut for PrintOut {
         println!("Disabling output");
     }
     fn prepare(&mut self) {
-        print!("Preparing device");
+        println!("Preparing device");
     }
 }
 
