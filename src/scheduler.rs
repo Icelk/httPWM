@@ -283,7 +283,7 @@ pub struct State {
     wake_up: Option<(NaiveDateTime, Command)>,
     transition: Option<TransitionState>,
     last_instance: Instant,
-    last_scheduler: Option<(String, bool)>,
+    last_scheduler: Option<String>,
 }
 impl State {
     pub fn new(state: Arc<Mutex<SharedState>>) -> Self {
@@ -374,17 +374,12 @@ impl State {
                         {
                             let mut lock = self.shared.lock().unwrap();
                             match self.last_scheduler.as_ref() {
-                                Some((name, remove)) => match lock.mut_schedulers().get_mut(name) {
-                                    Some(scheduler) => match remove {
-                                        true => {
+                                Some(name) => match lock.mut_schedulers().get_mut(name) {
+                                    Some(scheduler) => match scheduler.advance() {
+                                        Keep::Keep => {}
+                                        Keep::Remove => {
                                             lock.mut_schedulers().remove(name);
                                         }
-                                        false => match scheduler.advance() {
-                                            Keep::Keep => {}
-                                            Keep::Remove => {
-                                                lock.mut_schedulers().remove(name);
-                                            }
-                                        },
                                     },
                                     None => {
                                         panic!("attempting to get scheduler not existing. Did you clear the list?");
@@ -471,7 +466,7 @@ impl State {
         };
 
         if let Some(name) = name {
-            self.last_scheduler = Some((name, has_occurred(date_time)));
+            self.last_scheduler = Some(name);
         }
 
         self.wake_up = Some((date_time, cmd));
