@@ -241,6 +241,8 @@ pub struct SharedState {
     transition: Option<Transition>,
     week_scheduler: WeekScheduler,
     schedulers: HashMap<String, Box<dyn Scheduler>>,
+
+    changed: bool,
 }
 impl SharedState {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -249,12 +251,35 @@ impl SharedState {
             transition: None,
             week_scheduler: scheduler,
             schedulers: HashMap::new(),
+            changed: false,
         }
     }
 
     pub fn set_strength(&mut self, strength: Strength) {
         self.strength = strength;
         self.transition = None;
+        self.set_changed();
+    }
+    pub fn set_transition(&mut self, transition: Option<Transition>) {
+        self.transition = transition;
+        self.set_changed();
+    }
+    pub fn set_changed(&mut self) {
+        self.changed = true;
+    }
+    pub fn mut_schedulers(&mut self) -> &mut HashMap<String, Box<dyn Scheduler>> {
+        self.changed = true;
+        &mut self.schedulers
+    }
+    pub fn mut_week_scheduler(&mut self) -> &mut WeekScheduler {
+        self.changed = true;
+        &mut self.week_scheduler
+    }
+
+    pub fn handle_changes(&mut self) -> bool {
+        let changes = self.changed;
+        self.changed = false;
+        changes
     }
 
     pub fn get_week_schedule(&self) -> &WeekScheduler {
@@ -330,9 +355,9 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                     None => match sleeping {
                         Sleeping::To(date_time) => match has_occurred(date_time) {
                             false => {
-                                    thread::sleep(Duration::from_millis(1));
-                                    continue;
-                                }
+                                thread::sleep(Duration::from_millis(1));
+                                continue;
+                            }
                             true => None,
                         },
                         Sleeping::Forever => {

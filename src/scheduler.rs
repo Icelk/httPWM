@@ -327,13 +327,19 @@ impl State {
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
                     {
-                        *self.shared.lock().unwrap().week_schedule.get_mut(day) = time;
+                        *self
+                            .shared
+                            .lock()
+                            .unwrap()
+                            .mut_week_scheduler()
+                            .get_mut(day) = time;
                     }
                     self.get_next()
                 }
                 Command::ChangeDayTimerTransition(new_transition) => {
                     {
-                        self.shared.lock().unwrap().week_schedule.transition = new_transition;
+                        self.shared.lock().unwrap().mut_week_scheduler().transition =
+                            new_transition;
                     }
                     self.get_next()
                 }
@@ -341,20 +347,23 @@ impl State {
                     self.shared
                         .lock()
                         .unwrap()
-                        .schedulers
+                        .mut_schedulers()
                         .insert(name, scheduler);
                     self.get_next()
                 }
                 Command::RemoveScheduler(name) => {
-                    self.shared.lock().unwrap().schedulers.remove(&name);
+                    self.shared.lock().unwrap().mut_schedulers().remove(&name);
                     self.get_next()
                 }
                 Command::ClearAllSchedulers => {
-                    self.shared.lock().unwrap().schedulers.clear();
+                    self.shared.lock().unwrap().mut_schedulers().clear();
                     self.get_next()
                 }
                 Command::SetTransition(transition) => {
-                    self.shared.lock().unwrap().transition = Some(Transition::clone(&transition));
+                    self.shared
+                        .lock()
+                        .unwrap()
+                        .set_transition(Some(Transition::clone(&transition)));
                     self.transition = Some(TransitionState::new(transition));
                     self.last_instance = Instant::now();
                     // unwrap() is ok; we've just set transition to be `Some`

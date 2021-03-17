@@ -1,3 +1,4 @@
+use chrono::{NaiveTime, Weekday};
 use httpwm::*;
 use kvarn::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -48,10 +49,13 @@ fn main() {
                 .map(|scheduler| (scheduler, state))
         }) {
             Some((scheduler, data)) => (save_state::DataWrapper::new(data), scheduler),
-            None => (
-                save_state::DataWrapper::new(save_state::Data::from_week_scheduler(&scheduler)),
-                scheduler,
-            ),
+            None => {
+                eprintln!("Failed to parse state file. Using defaults.");
+                (
+                    save_state::DataWrapper::new(save_state::Data::from_week_scheduler(&scheduler)),
+                    scheduler,
+                )
+            }
         }
     };
     let controller = Controller::new(pwm, week_scheduler);
@@ -77,18 +81,28 @@ fn main() {
                 .apply(&*controller.lock().unwrap());
 
             thread::spawn(move || loop {
-                thread::sleep(Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(1000));
                 let mut state = saved.lock().unwrap();
 
-                {
-                    match shared.lock().unwrap().get_transition() {
-                        Some(transition) => state.get_mut().set_transition(transition),
-                        None => state.clear_transition(),
-                    }
-                };
+                // {
+                //     match shared.lock().unwrap().get_transition() {
+                //         Some(transition) => state.get_mut().set_transition(transition),
+                //         None => state.clear_transition(),
+                //     }
+                // };
 
-                if state.save() {
+                if state.save() || shared.lock().unwrap().handle_changes() {
                     println!("Saving state!");
+                    {
+                        let lock = shared.lock().unwrap();
+                        let present_schedulers = lock.get_schedulers();
+                        todo!("Not call `get_mut()` so the `save` bool isn't triggered");
+                        state
+                            .get_mut()
+                            .mut_schedulers()
+                            .retain(|scheduler| present_schedulers.contains_key(&scheduler.name));
+                    }
+
                     let data = {
                         let config = ron::ser::PrettyConfig::default()
                             .with_enumerate_arrays(true)
@@ -186,21 +200,22 @@ fn create_server<T: VariableOut + Send>(
         let day_data = serde_json::from_slice(req.body()).ok();
         let command = day_data
             .as_ref()
-            .and_then(|set_day: &DayData| set_day.to_command());
+            .and_then(|set_day: &DayData| set_day.parse());
 
         match command {
-            Some(command) => {
-                println!("Changed time of day to {:?}", command);
+            Some((day, time)) => {
+                println!("Changed time of {} to {:?}", day, time);
+
+                {
+                    let mut lock = save.lock().unwrap();
+                    let week_scheduler = lock.get_mut().mut_week_scheduler();
+                    *week_scheduler.get_mut(day) =
+                        time.map(|time| time.format("%H:%M:%S").to_string());
+                }
                 {
                     let lock = controller.lock().unwrap();
-                    lock.send(command);
+                    lock.send(Command::ChangeDayTimer(day, time));
                 }
-
-                let mut save = save.lock().unwrap();
-                let week_scheduler = save.get_mut().mut_week_scheduler();
-                // unwrap is ok, they are already parsed ↑
-                let day_data = day_data.as_ref().unwrap();
-                *week_scheduler.get_mut(day_data.day.parse().unwrap()) = day_data.time.clone();
             }
             None => {
                 utility::write_error(buffer, 400, cache);
@@ -300,7 +315,11 @@ fn create_server<T: VariableOut + Send>(
                 (
                     SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string()),
                     match scheduler.get_next() {
-                        Next::In(dur, _) => Some(dur),
+                        Next::At(dur, _) => Some(
+                            (dur - get_naive_now())
+                                .to_std()
+                                .unwrap_or(Duration::new(0, 0)),
+                        ),
                         Next::Unknown => None,
                     },
                 )
@@ -414,16 +433,16 @@ pub mod save_state {
                 };
             };
 
-            Some(WeekScheduler {
-                mon: fmt_time!(self.mon),
-                tue: fmt_time!(self.tue),
-                wed: fmt_time!(self.wed),
-                thu: fmt_time!(self.thu),
-                fri: fmt_time!(self.fri),
-                sat: fmt_time!(self.sat),
-                sun: fmt_time!(self.sun),
-                transition: self.transition.to_transition()?,
-            })
+            let mut scheduler = WeekScheduler::empty(self.transition.to_transition()?);
+
+            scheduler.mon = fmt_time!(self.mon);
+            scheduler.tue = fmt_time!(self.tue);
+            scheduler.wed = fmt_time!(self.wed);
+            scheduler.thu = fmt_time!(self.thu);
+            scheduler.fri = fmt_time!(self.fri);
+            scheduler.sat = fmt_time!(self.sat);
+            scheduler.sun = fmt_time!(self.sun);
+            Some(scheduler)
         }
     }
     pub struct DataWrapper(Data, bool);
@@ -518,6 +537,9 @@ pub mod save_state {
         pub fn mut_schedulers(&mut self) -> &mut Vec<AddSchedulerData> {
             &mut self.schedulers
         }
+        pub fn ref_schedulers(&self) -> &Vec<AddSchedulerData> {
+            &self.schedulers
+        }
         pub fn ref_week_scheduler(&self) -> &WeekSchedulerData {
             // ok, since it must be `Some`, it's just an option for parsing from file.
             self.week_scheduler.as_ref().unwrap()
@@ -543,13 +565,13 @@ pub struct DayData {
     time: Option<String>,
 }
 impl DayData {
-    pub fn to_command(&self) -> Option<Command> {
+    pub fn parse(&self) -> Option<(Weekday, Option<NaiveTime>)> {
         let day: chrono::Weekday = self.day.parse().ok()?;
         let time = match self.time.as_ref() {
             Some(time) => Some(parse_time(&time)?),
             None => None,
         };
-        Some(Command::ChangeDayTimer(day, time))
+        Some((day, time))
     }
 }
 
@@ -672,11 +694,7 @@ pub mod extra_schedulers {
     }
     impl Scheduler for At {
         fn get_next(&self) -> Next {
-            let now = get_naive_now();
-            Next::In(
-                (self.moment - now).to_std().unwrap_or(Duration::new(0, 0)),
-                self.common.get_command().into_inner(),
-            )
+            Next::At(self.moment, self.common.get_command().into_inner())
         }
         fn advance(&mut self) -> Keep {
             Keep::Remove
@@ -704,8 +722,8 @@ pub mod extra_schedulers {
             let now = get_naive_now();
             if self.day == now.weekday() && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
-                Next::In(
-                    (self.time - now.time()).to_std().unwrap(),
+                Next::At(
+                    chrono::Local::today().naive_utc().and_time(self.time),
                     self.common.get_command().into_inner(),
                 )
             } else {
@@ -718,12 +736,10 @@ pub mod extra_schedulers {
                     }
                 })
                 .unwrap();
-                // unwrap is OK, since date is always `.succ()`
-                let dur = ((now.date().and_time(time) + chrono::Duration::days(offset as i64))
-                    - now)
-                    .to_std()
-                    .unwrap();
-                Next::In(dur, self.common.get_command().into_inner())
+                Next::At(
+                    now.date().and_time(time) + chrono::Duration::days(offset as i64),
+                    self.common.get_command().into_inner(),
+                )
             }
         }
         fn advance(&mut self) -> Keep {
@@ -751,16 +767,15 @@ pub mod extra_schedulers {
             let now = get_naive_now();
             if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
-                Next::In(
-                    (self.time - now.time()).to_std().unwrap(),
+                Next::At(
+                    chrono::Local::today().naive_utc().and_time(self.time),
                     self.common.get_command().into_inner(),
                 )
             } else {
                 // Unwrap is OK, it's one day ahead!
-                Next::In(
-                    ((self.time - now.time()) + chrono::Duration::days(1))
-                        .to_std()
-                        .unwrap(),
+                Next::At(
+                    chrono::Local::today().naive_utc().and_time(self.time)
+                        + chrono::Duration::days(1),
                     self.common.get_command().into_inner(),
                 )
             }
@@ -823,8 +838,8 @@ impl SchedulerData {
         let dur = scheduler.get_next();
 
         let next_occurrence = match dur {
-            Next::In(dur, _) => {
-                let dur = chrono::Duration::from_std(dur).expect("std duration overflowed!");
+            Next::At(date_time, _) => {
+                let dur = date_time - get_naive_now();
                 if dur.num_days() > 0 {
                     (get_naive_now() + dur)
                         .format("%Y-%m-%d %H:%M:%S")
