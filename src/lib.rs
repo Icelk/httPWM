@@ -241,8 +241,6 @@ pub struct SharedState {
     transition: Option<Transition>,
     week_scheduler: WeekScheduler,
     schedulers: HashMap<String, Box<dyn Scheduler>>,
-
-    changed: bool,
 }
 impl SharedState {
     pub fn new(scheduler: WeekScheduler) -> Self {
@@ -251,48 +249,36 @@ impl SharedState {
             transition: None,
             week_scheduler: scheduler,
             schedulers: HashMap::new(),
-            changed: false,
         }
     }
 
-    pub fn set_strength(&mut self, strength: Strength) {
-        self.strength = strength;
-        self.transition = None;
-        self.set_changed();
-    }
-    pub fn set_transition(&mut self, transition: Option<Transition>) {
-        self.transition = transition;
-        self.set_changed();
-    }
-    pub fn set_changed(&mut self) {
-        self.changed = true;
-    }
-    pub fn mut_schedulers(&mut self) -> &mut HashMap<String, Box<dyn Scheduler>> {
-        self.changed = true;
-        &mut self.schedulers
-    }
-    pub fn mut_week_scheduler(&mut self) -> &mut WeekScheduler {
-        self.changed = true;
-        &mut self.week_scheduler
-    }
-
-    pub fn handle_changes(&mut self) -> bool {
-        let changes = self.changed;
-        self.changed = false;
-        changes
-    }
-
-    pub fn get_week_schedule(&self) -> &WeekScheduler {
-        &self.week_scheduler
-    }
     pub fn get_strength(&self) -> &Strength {
         &self.strength
     }
-    pub fn get_schedulers(&self) -> &HashMap<String, Box<dyn Scheduler>> {
-        &self.schedulers
+    pub fn set_strength(&mut self, strength: Strength) {
+        self.strength = strength;
+        self.transition = None;
     }
+
     pub fn get_transition(&self) -> Option<&Transition> {
         self.transition.as_ref()
+    }
+    pub fn set_transition(&mut self, transition: Option<Transition>) {
+        self.transition = transition;
+    }
+
+    pub fn ref_week_schedule(&self) -> &WeekScheduler {
+        &self.week_scheduler
+    }
+    pub fn mut_week_scheduler(&mut self) -> &mut WeekScheduler {
+        &mut self.week_scheduler
+    }
+
+    pub fn ref_schedulers(&self) -> &HashMap<String, Box<dyn Scheduler>> {
+        &self.schedulers
+    }
+    pub fn mut_schedulers(&mut self) -> &mut HashMap<String, Box<dyn Scheduler>> {
+        &mut self.schedulers
     }
 }
 

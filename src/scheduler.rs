@@ -115,9 +115,6 @@ impl Scheduler for WeekScheduler {
             None => return Next::Unknown,
         };
 
-        let tmp =
-            chrono::Duration::from_std(self.transition.time).unwrap_or(chrono::Duration::zero());
-
         // Check if last was not today, then abort.
         let next = if now.time() < next_today
             && self
@@ -380,12 +377,12 @@ impl State {
                                 Some((name, remove)) => match lock.mut_schedulers().get_mut(name) {
                                     Some(scheduler) => match remove {
                                         true => {
-                                            lock.schedulers.remove(name);
+                                            lock.mut_schedulers().remove(name);
                                         }
                                         false => match scheduler.advance() {
                                             Keep::Keep => {}
                                             Keep::Remove => {
-                                                lock.schedulers.remove(name);
+                                                lock.mut_schedulers().remove(name);
                                             }
                                         },
                                     },
@@ -395,7 +392,7 @@ impl State {
                                 },
                                 None => {
                                     // Discarding, because we know it'll want to continue.
-                                    lock.week_scheduler.advance();
+                                    lock.mut_week_scheduler().advance();
                                 }
                             }
                         }
@@ -446,7 +443,7 @@ impl State {
             //     .retain(|_name, s| !matches!(s.get_next(), Next::Unknown));
 
             let schedulers_next = lock
-                .schedulers
+                .ref_schedulers()
                 .iter()
                 .map(|(name, s)| (name, s.get_next()))
                 .min_by_key(|(_, next)| match next {
@@ -454,7 +451,7 @@ impl State {
                     Next::Unknown => unreachable!(".retain() call above"),
                 });
 
-            let week_next = Scheduler::get_next(&lock.week_scheduler);
+            let week_next = Scheduler::get_next(lock.ref_week_schedule());
             match week_next {
                 Next::At(week_dur, week_cmd) => match schedulers_next {
                     Some((name, schedulers_next)) => match schedulers_next {
