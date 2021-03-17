@@ -299,7 +299,8 @@ async function load() {
 
             if (loadedData !== null && loadedData[target] === "expanded") {
                 // so the UI has time to draw, so we can get scrollHeight
-                setTimeout(() => { toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`; }, 0);
+                toggled.style.maxHeight = `100vh`;
+                setTimeout(() => { toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`; }, 50);
 
                 header.classList.add("expanded");
             } else {
