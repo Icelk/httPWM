@@ -103,7 +103,10 @@ async function sendDayTime(day, time) {
         body: JSON.stringify({ day: day, time: time })
     });
     responseNotification(response, "Set day time");
-    await getAndApplyState();
+    // Takes a bit of time in backend to send message between threads...
+    // (it's to damn fast)
+    setTimeout(async () => await getAndApplyState(), 50);
+
 }
 function getAndSendDayTime() {
     if (dayOption.value === "some") {
