@@ -66,8 +66,7 @@ table {
 }
 .table-round {
     border: 2px solid var(--bg-second);
-    border-radius: 0.75e;
-    display: inline-block;
+    border-radius: 0.75em;
 }
 
 td, th {
