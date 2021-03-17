@@ -12,7 +12,6 @@
 
 <body style="text-align: center;">
     <h2>Set current value</h2>
-    <br>
     <i>Overrides current transition (including ongoing scheduled transitions)</i>
     <br>
     <input class="slider" type="range" name="Strength" id="strength" oninput="toSend = this.value" min="0" max="1"
@@ -21,9 +20,8 @@
 
 
     <h2 toggle="transitions">Transitions</h2>
-    <br>
-    <span id="transitions">
-        <span class="collapsible-child">
+    <div id="transitions">
+        <div class="collapsible-child">
             <i>Adjust the settings to your liking and either play it or set it as the default for the daily schedules.
                 The following values are defaults for the daily schedule.</i>
             <br>
@@ -44,15 +42,13 @@
                 value="0.5" placeholder="Fade out duration, multiplier of 'time'">
             <button onclick="getAndSetTransition('preview')">Preview now</button>
             <button onclick="getAndSetTransition('set')">Set as daily default</button>
-        </span>
-    </span>
-    <br>
+        </div>
+    </div>
 
 
     <h2 toggle="schedulers">Schedulers</h2>
-    <br>
-    <span id="schedulers">
-        <span class="collapsible-child">
+    <div id="schedulers">
+        <div class="collapsible-child">
             <i>Schedulers are events that can trigger internal <code>commands</code>. When adding one, it'll associate
                 the
                 current transition above with the event.
@@ -61,45 +57,28 @@
                 the
                 action with a scheduler.
                 Keep in mind that the transition will <b>begin</b> at the specified time.</i>
-            <div>
-                <div style="display: none;" id="schedulerTemplate">
-                    <tr>
-                        <td>
-                            $name
-                        </td>
-                        <td>
-                            $description
-                        </td>
-                        <td>
-                            $kind
-                        </td>
-                        <td>
-                            $next
-                        </td>
-                    </tr>
-                </div>
-
-                <span class="table-round center m-top">
-                    <table>
-                        <thead>
-                            <tr>
-                                <td>Name</td>
-                                <td>Description</td>
-                                <td>Kind</td>
-                                <td>Next occurrence</td>
-                            </tr>
-                        </thead>
-                        <tbody id="schedulerList">
-                            <tr>
-                                <td>name</td>
-                                <td>hi</td>
-                                <td>unknown</td>
-                                <td>07:00:00</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </span>
+            <br>
+            <div class="table-round center m-top">
+                <table>
+                    <thead>
+                        <tr>
+                            <td>Name</td>
+                            <td>Description</td>
+                            <td>Kind</td>
+                            <td>Next occurrence</td>
+                        </tr>
+                    </thead>
+                    <tbody id="schedulerList">
+                        <tr>
+                            <td>name</td>
+                            <td>hi</td>
+                            <td>unknown</td>
+                            <td>07:00:00</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
+            <br>
             <select name="Scheduler kind" id="schedulerKind" onchange="checkSchedulerAddExtras()">
                 <option value="at">At...</option>
                 <option value="every-week">Every week at...</option>
@@ -122,15 +101,13 @@
             <input type="text" name="Scheduler description" id="schedulerDescription" placeholder="Description">
 
             <button onclick="getAndAddScheduler()">Add with current transition</button>
-        </span>
-    </span>
-    <br>
+        </div>
+    </div>
 
 
     <h2 toggle="timeOfDay">Set scheduler time of day</h2>
-    <br>
-    <span id="timeOfDay">
-        <span class="collapsible-child">
+    <div id="timeOfDay">
+        <div class="collapsible-child">
             <i>Sets the scheduled time (if any) to perform set transition (if you haven't changed it, reload this page
                 and
                 press
@@ -153,8 +130,7 @@
             <input type="text" style="width: 6em;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
             <button onclick="getAndSendDayTime()">Change!</button>
 
-            <br>
-            <span class="table-round center m-top">
+            <div class="table-round center m-top">
                 <table>
                     <tbody>
                         <tr>
@@ -191,9 +167,9 @@
                         </tr>
                     </tbody>
                 </table>
-            </span>
-        </span>
-    </span>
+            </div>
+        </div>
+    </div>
     <br>
 </body>
 

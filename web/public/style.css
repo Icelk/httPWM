@@ -39,11 +39,13 @@ i {
 }
 
 h2 {
-    display: inline-block;
+    width: fit-content;
     
     border-bottom: var(--bg-second) 2px solid;
     padding: 0.1em 0.5em;
     margin-bottom: 0.25em;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 code {
@@ -56,6 +58,10 @@ code {
 body{
     color: var(--txt-col);
     background-color: var(--bg-col);
+}
+
+div {
+    width: fit-content;
 }
 
 table {
