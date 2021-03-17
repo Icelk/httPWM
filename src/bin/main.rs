@@ -293,7 +293,7 @@ fn create_server<T: VariableOut + Send>(
         let data = serde_json::from_slice(req.body()).ok();
         let command = data.and_then(|data: AddSchedulerData| {
             let data_clone = data.clone();
-            data.into_command().map(|cmd| (data_clone, cmd))
+            data.into_command(false).map(|cmd| (data_clone, cmd))
         });
 
         match command {
@@ -519,7 +519,7 @@ pub mod save_state {
             for scheduler in self
                 .schedulers
                 .iter()
-                .filter_map(|s| s.clone().into_command())
+                .filter_map(|s| s.clone().into_command(true))
             {
                 controller.send(scheduler);
             }
@@ -826,7 +826,7 @@ pub struct AddSchedulerData {
     transition: TransitionData,
 }
 impl AddSchedulerData {
-    pub fn into_command(self) -> Option<Command> {
+    pub fn into_command(self, allow_past: bool) -> Option<Command> {
         let transition = self.transition.to_transition()?;
         let time = parse_time(&self.time)?;
         // Unwrap is ok, since we know `SetTransition` is clonable
@@ -835,12 +835,16 @@ impl AddSchedulerData {
 
         let scheduler: Box<dyn Scheduler> =
             match self.kind.as_str() {
-                "at" if self.extras.len() == 1 => Box::new(extra_schedulers::At::new(
-                    common,
-                    chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
-                        .ok()?
-                        .and_time(time),
-                )),
+                "at" if self.extras.len() == 1 => {
+                    let date_time =
+                        chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
+                            .ok()?
+                            .and_time(time);
+                    if has_occurred(date_time) && !allow_past {
+                        return None;
+                    }
+                    Box::new(extra_schedulers::At::new(common, date_time))
+                }
                 "every-week" if self.extras.len() == 1 => Box::new(
                     extra_schedulers::EveryWeek::new(common, time, self.extras[0].parse().ok()?),
                 ),
