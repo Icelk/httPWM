@@ -48,13 +48,10 @@ fn main() {
                 .to_scheduler()
                 .map(|scheduler| (scheduler, state))
         }) {
-            Some((scheduler, data)) => (save_state::DataWrapper::new(data), scheduler),
+            Some((scheduler, data)) => (data, scheduler),
             None => {
                 eprintln!("Failed to parse state file. Using defaults.");
-                (
-                    save_state::DataWrapper::new(save_state::Data::from_week_scheduler(&scheduler)),
-                    scheduler,
-                )
+                (save_state::Data::from_week_scheduler(&scheduler), scheduler)
             }
         }
     };
@@ -65,7 +62,7 @@ fn main() {
     let shared = controller.get_state();
 
     let controller = Arc::new(Mutex::new(controller));
-    let saved_state = Arc::new(Mutex::new(saved_state));
+    let saved_state = Arc::new(Mutex::new(save_state::DataWrapper::new(saved_state)));
     {
         let shared = Arc::clone(&shared);
         let saved = Arc::clone(&saved_state);
@@ -82,32 +79,55 @@ fn main() {
 
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_millis(1000));
-                let mut state = saved.lock().unwrap();
+                let mut saved = saved.lock().unwrap();
 
-                // {
-                //     match shared.lock().unwrap().get_transition() {
-                //         Some(transition) => state.get_mut().set_transition(transition),
-                //         None => state.clear_transition(),
-                //     }
-                // };
+                let mut changed = false;
+                {
+                    let lock = shared.lock().unwrap();
+                    let present_schedulers = lock.ref_schedulers();
 
-                if state.save() || shared.lock().unwrap().handle_changes() {
-                    println!("Saving state!");
-                    {
-                        let lock = shared.lock().unwrap();
-                        let present_schedulers = lock.get_schedulers();
-                        todo!("Not call `get_mut()` so the `save` bool isn't triggered");
-                        state
-                            .get_mut()
-                            .mut_schedulers()
-                            .retain(|scheduler| present_schedulers.contains_key(&scheduler.name));
+                    let schedulers = saved.no_save_mut().mut_schedulers();
+
+                    let len = schedulers.len();
+                    schedulers.retain(|scheduler| present_schedulers.contains_key(&scheduler.name));
+                    if len != schedulers.len() {
+                        changed = true;
                     }
+                }
+                {
+                    let shared = shared.lock().unwrap();
+                    match saved.get_ref().eq_transition(shared.get_transition()) {
+                        // Do nothing; they match
+                        true => {}
+                        false => {
+                            saved.no_save_mut().set_transition(shared.get_transition());
+                            changed = true;
+                        }
+                    }
+                    // match state.ref_strength() == Some(shared.get_strength().into_inner()) {
+                    //     true => {}
+                    //     false => {
+                    //         state.set_strength(Strength::clone(shared.get_strength()));
+                    //         changed = true;
+                    //     }
+                    // }
+                }
+                // println!(
+                //     "change: {} {:?} {:?}",
+                //     changed,
+                //     saved.get_ref().ref_strength(),
+                //     shared.lock().unwrap().get_strength()
+                // );
+
+                if saved.save() || changed {
+                    println!("Saving state!");
 
                     let data = {
                         let config = ron::ser::PrettyConfig::default()
                             .with_enumerate_arrays(true)
-                            .with_decimal_floats(true);
-                        match ron::ser::to_string_pretty(state.get_ref(), config) {
+                            .with_decimal_floats(true)
+                            .with_extensions(ron::extensions::Extensions::IMPLICIT_SOME);
+                        match ron::ser::to_string_pretty(saved.get_ref(), config) {
                             Err(err) => {
                                 eprintln!("Failed to save state {}", err);
                                 continue;
@@ -115,7 +135,7 @@ fn main() {
                             Ok(s) => s,
                         }
                     };
-                    drop(state);
+                    drop(saved);
 
                     let mut file = match fs::File::create(SAVE_PATH) {
                         Err(err) => {
@@ -309,7 +329,7 @@ fn create_server<T: VariableOut + Send>(
         let mut schedulers: Vec<(SchedulerData, Option<Duration>)> = local_state
             .lock()
             .unwrap()
-            .get_schedulers()
+            .ref_schedulers()
             .iter()
             .map(|(name, scheduler)| {
                 (
@@ -335,7 +355,6 @@ fn create_server<T: VariableOut + Send>(
     });
 
     let controller = ctl();
-    let save = saved();
     bindings.bind_page("/remove-scheduler", move |buffer, req, cache| {
         get_query_value(req, buffer, cache, "name").map(|name| {
             match percent_encoding::percent_decode_str(name).decode_utf8() {
@@ -346,11 +365,12 @@ fn create_server<T: VariableOut + Send>(
                             .unwrap()
                             .send(Command::RemoveScheduler(s.to_string()));
                     }
-                    save.lock()
-                        .unwrap()
-                        .get_mut()
-                        .mut_schedulers()
-                        .retain(|scheduler| scheduler.name != s);
+                    // Can be removed since we check if internal schedulers disappeared.
+                    // save.lock()
+                    //     .unwrap()
+                    //     .get_mut()
+                    //     .mut_schedulers()
+                    //     .retain(|scheduler| scheduler.name != s);
                 }
                 Err(_) => {
                     utility::write_error(buffer, 400, cache);
@@ -459,15 +479,9 @@ pub mod save_state {
             self.1 = true;
             &mut self.0
         }
-        /// Will clear the inner transition and only set inner `save` flag to true if a value is returned.
-        pub fn clear_transition(&mut self) -> Option<TransitionData> {
-            match self.0.current_transition.take() {
-                Some(took) => {
-                    self.1 = true;
-                    Some(took)
-                }
-                None => None,
-            }
+        /// Will not signal that the data has been changed. Use with caution.
+        pub fn no_save_mut(&mut self) -> &mut Data {
+            &mut self.0
         }
         pub fn save(&mut self) -> bool {
             let save = self.1;
@@ -529,17 +543,22 @@ pub mod save_state {
             }
         }
 
+        pub fn ref_strength(&self) -> Option<f64> {
+            self.strength
+        }
         pub fn set_strength(&mut self, strength: Strength) -> Option<Strength> {
             self.strength
                 .replace(strength.into_inner())
                 .map(|f| Strength::new_clamped(f))
         }
-        pub fn mut_schedulers(&mut self) -> &mut Vec<AddSchedulerData> {
-            &mut self.schedulers
-        }
+
         pub fn ref_schedulers(&self) -> &Vec<AddSchedulerData> {
             &self.schedulers
         }
+        pub fn mut_schedulers(&mut self) -> &mut Vec<AddSchedulerData> {
+            &mut self.schedulers
+        }
+
         pub fn ref_week_scheduler(&self) -> &WeekSchedulerData {
             // ok, since it must be `Some`, it's just an option for parsing from file.
             self.week_scheduler.as_ref().unwrap()
@@ -552,9 +571,25 @@ pub mod save_state {
             self.week_scheduler
                 .replace(WeekSchedulerData::from_scheduler(new))
         }
-        pub fn set_transition(&mut self, new: &Transition) -> Option<TransitionData> {
-            self.current_transition
-                .replace(TransitionData::from_transition(new))
+        pub fn eq_transition(&self, other: Option<&Transition>) -> bool {
+            match self.current_transition.as_ref() {
+                Some(transition) => match transition.to_transition() {
+                    Some(transition) => match other {
+                        Some(other) => &transition == other,
+                        None => false,
+                    },
+                    None => false,
+                },
+                None => other.is_none(),
+            }
+        }
+        pub fn set_transition(&mut self, new: Option<&Transition>) -> Option<TransitionData> {
+            match new {
+                None => self.current_transition.take(),
+                Some(transition) => self
+                    .current_transition
+                    .replace(TransitionData::from_transition(transition)),
+            }
         }
     }
 }
@@ -627,7 +662,7 @@ impl StateData {
             days.insert(
                 weekday_to_lowercase_str(&day).to_string(),
                 state
-                    .get_week_schedule()
+                    .ref_week_schedule()
                     .get(day)
                     .map(|time| time.to_string()),
             );
@@ -637,7 +672,7 @@ impl StateData {
         Self {
             strength: Strength::clone(state.get_strength()).into_inner(),
             days,
-            transition: TransitionData::from_transition(&state.get_week_schedule().transition),
+            transition: TransitionData::from_transition(&state.ref_week_schedule().transition),
         }
     }
 }
