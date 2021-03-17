@@ -437,10 +437,6 @@ impl State {
     fn queue_sleep(&mut self) -> SleepTime {
         let (date_time, cmd, name) = {
             let lock = self.shared.lock().unwrap();
-            // Remove unneeded schedulers
-            // This is redundant; we are checking passed schedulers and removing them.
-            // lock.schedulers
-            //     .retain(|_name, s| !matches!(s.get_next(), Next::Unknown));
 
             let schedulers_next = lock
                 .ref_schedulers()
@@ -476,7 +472,6 @@ impl State {
 
         if let Some(name) = name {
             self.last_scheduler = Some((name, has_occurred(date_time)));
-            println!("{:?}", self.last_scheduler);
         }
 
         self.wake_up = Some((date_time, cmd));

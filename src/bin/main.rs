@@ -104,20 +104,7 @@ fn main() {
                             changed = true;
                         }
                     }
-                    // match state.ref_strength() == Some(shared.get_strength().into_inner()) {
-                    //     true => {}
-                    //     false => {
-                    //         state.set_strength(Strength::clone(shared.get_strength()));
-                    //         changed = true;
-                    //     }
-                    // }
                 }
-                // println!(
-                //     "change: {} {:?} {:?}",
-                //     changed,
-                //     saved.get_ref().ref_strength(),
-                //     shared.lock().unwrap().get_strength()
-                // );
 
                 if saved.save() || changed {
                     println!("Saving state!");
