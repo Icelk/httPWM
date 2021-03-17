@@ -239,7 +239,7 @@ pub fn get_naive_now() -> chrono::NaiveDateTime {
 pub struct SharedState {
     strength: Strength,
     transition: Option<Transition>,
-    week_schedule: WeekScheduler,
+    week_scheduler: WeekScheduler,
     schedulers: HashMap<String, Box<dyn Scheduler>>,
 }
 impl SharedState {
@@ -247,7 +247,7 @@ impl SharedState {
         Self {
             strength: Strength::new(0.0),
             transition: None,
-            week_schedule: scheduler,
+            week_scheduler: scheduler,
             schedulers: HashMap::new(),
         }
     }
@@ -258,7 +258,7 @@ impl SharedState {
     }
 
     pub fn get_week_schedule(&self) -> &WeekScheduler {
-        &self.week_schedule
+        &self.week_scheduler
     }
     pub fn get_strength(&self) -> &Strength {
         &self.strength
@@ -285,9 +285,14 @@ pub fn weekday_to_lowercase_str(weekday: &Weekday) -> &'static str {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum Sleeping {
-    To(Instant),
+    To(NaiveDateTime),
     Wake,
     Forever,
+}
+
+pub fn has_occurred(date_time: NaiveDateTime) -> bool {
+    let now = get_naive_now();
+    (date_time - now) < chrono::Duration::zero()
 }
 
 /// The handler's job is to handle [`Scheduler`]s and transitions.
@@ -323,15 +328,13 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                         Some(r)
                     }
                     None => match sleeping {
-                        Sleeping::To(instant) => {
-                            match instant.checked_duration_since(Instant::now()) {
-                                Some(_) => {
+                        Sleeping::To(date_time) => match has_occurred(date_time) {
+                            false => {
                                     thread::sleep(Duration::from_millis(1));
                                     continue;
                                 }
-                                None => None,
-                            }
-                        }
+                            true => None,
+                        },
                         Sleeping::Forever => {
                             thread::sleep(Duration::from_millis(1));
                             continue;
@@ -342,16 +345,13 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 let action = state.process(command);
                 match action {
                     Action::Wait(sleep_time) => match sleep_time {
-                        scheduler::SleepTime::Duration(dur) => {
+                        scheduler::SleepTime::To(date_time) => {
                             if enabled.map(|value| value == 0.0).unwrap_or(false) {
                                 output.disable();
                                 enabled = None;
                             }
-                            match chrono::Duration::from_std(dur) {
-                                    Ok(dur) => println!("Sleeping to {:?}", get_naive_now() + dur),
-                                    Err(_) => eprintln!("Sleeping to unknown date, failed to convert std::Duration to chrono::Duration when printing"),
-                                }
-                            sleeping = Sleeping::To(Instant::now() + dur)
+                            println!("Sleeping to {:?}", date_time);
+                            sleeping = Sleeping::To(date_time)
                         }
                         scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,
                     },

@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
 use crate::{
-    get_naive_now, Action, Command, Duration, Instant, SharedState, Strength, Transition,
-    TransitionInterpolation,
+    get_naive_now, has_occurred, Action, Command, Duration, Instant, SharedState, Strength,
+    Transition, TransitionInterpolation,
 };
 use chrono::prelude::*;
 use std::sync::{Arc, Mutex};
@@ -17,7 +17,7 @@ pub enum Keep {
     Remove,
 }
 pub enum Next {
-    In(Duration, Command),
+    At(NaiveDateTime, Command),
     Unknown,
 }
 pub trait Scheduler: Debug + Send + Sync {
@@ -44,6 +44,7 @@ pub struct WeekScheduler {
     pub sat: Option<NaiveTime>,
     pub sun: Option<NaiveTime>,
     pub transition: Transition,
+    last: Option<NaiveDateTime>,
 }
 impl WeekScheduler {
     pub fn empty(transition: Transition) -> Self {
@@ -59,6 +60,7 @@ impl WeekScheduler {
             sat: time,
             sun: time,
             transition,
+            last: None,
         }
     }
 
@@ -102,22 +104,28 @@ impl WeekScheduler {
 }
 impl Scheduler for WeekScheduler {
     fn advance(&mut self) -> Keep {
+        self.last = Some(get_naive_now());
         Keep::Keep
     }
     fn get_next(&self) -> Next {
-        // todo!("take immediate in consideration");
-
         let now = get_naive_now();
-        let next = match self.get_next_from_day(now.weekday()).map(|(t, _)| *t) {
-            Some(t) => t,
+        // todo!("fix this to be naiveDateTime?");
+        let next_today = match self.get(now.weekday()) {
+            Some(t) => *t,
             None => return Next::Unknown,
         };
-        let next = if now.time()
-            < next
-                - chrono::Duration::from_std(self.transition.time)
-                    .unwrap_or(chrono::Duration::zero())
+
+        let tmp =
+            chrono::Duration::from_std(self.transition.time).unwrap_or(chrono::Duration::zero());
+
+        // Check if last was not today, then abort.
+        let next = if now.time() < next_today
+            && self
+                .last
+                .map(|l| l.date() < get_naive_now().date())
+                .unwrap_or(true)
         {
-            now.date().and_time(next)
+            now.date().and_time(next_today)
         } else {
             // Unwrap is ok; we checked the same function above and return if it was `None`.
             // If it returns `Some` for Weekday x, it will also return `Some` for Weekday x.succ(); it's a cycle.
@@ -127,13 +135,9 @@ impl Scheduler for WeekScheduler {
 
             now.date().and_time(*time) + chrono::Duration::days(day as i64)
         };
-        // The expect here should never happen, we checked above if now is less than next.
-        let next = (next - now)
-            .to_std()
-            .expect("duration is negative")
-            .checked_sub(self.transition.time)
-            .unwrap_or(Duration::new(0, 0));
-        Next::In(
+        // if your transition time is larger than what std can handle, you have other problems
+        let next = next - chrono::Duration::from_std(self.transition.time).unwrap();
+        Next::At(
             next,
             Command::SetTransition(Transition::clone(&self.transition)),
         )
@@ -270,7 +274,7 @@ impl TransitionState {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum SleepTime {
-    Duration(Duration),
+    To(NaiveDateTime),
     Forever,
 }
 
@@ -279,12 +283,10 @@ pub struct State {
     shared: Arc<Mutex<SharedState>>,
 
     finish: bool,
-    wake_up: Option<(Instant, Command)>,
+    wake_up: Option<(NaiveDateTime, Command)>,
     transition: Option<TransitionState>,
     last_instance: Instant,
-    last_scheduler: Option<String>,
-    /// Used to start transition which hasn't finished after a restart.
-    revive: bool,
+    last_scheduler: Option<(String, bool)>,
 }
 impl State {
     pub fn new(state: Arc<Mutex<SharedState>>) -> Self {
@@ -295,7 +297,6 @@ impl State {
             transition: None,
             last_instance: Instant::now(),
             last_scheduler: None,
-            revive: true,
         }
     }
 
@@ -367,23 +368,25 @@ impl State {
                         {
                             let mut lock = self.shared.lock().unwrap();
                             match self.last_scheduler.as_ref() {
-                                Some(name) => match lock.schedulers.get_mut(name) {
-                                    Some(scheduler) => {
-                                        let advance = scheduler.advance();
-                                        match advance {
+                                Some((name, remove)) => match lock.mut_schedulers().get_mut(name) {
+                                    Some(scheduler) => match remove {
+                                        true => {
+                                            lock.schedulers.remove(name);
+                                        }
+                                        false => match scheduler.advance() {
                                             Keep::Keep => {}
                                             Keep::Remove => {
                                                 lock.schedulers.remove(name);
                                             }
-                                        }
-                                    }
+                                        },
+                                    },
                                     None => {
                                         panic!("attempting to get scheduler not existing. Did you clear the list?");
                                     }
                                 },
                                 None => {
                                     // Discarding, because we know it'll want to continue.
-                                    lock.week_schedule.advance();
+                                    lock.week_scheduler.advance();
                                 }
                             }
                         }
@@ -426,41 +429,52 @@ impl State {
         }
     }
     fn queue_sleep(&mut self) -> SleepTime {
-        let (dur, cmd) = {
-            let mut lock = self.shared.lock().unwrap();
+        let (date_time, cmd, name) = {
+            let lock = self.shared.lock().unwrap();
             // Remove unneeded schedulers
-            lock.schedulers
-                .retain(|_name, s| !matches!(s.get_next(), Next::Unknown));
+            // This is redundant; we are checking passed schedulers and removing them.
+            // lock.schedulers
+            //     .retain(|_name, s| !matches!(s.get_next(), Next::Unknown));
 
             let schedulers_next = lock
                 .schedulers
                 .iter()
-                .map(|(_name, s)| s.get_next())
-                .min_by_key(|d| match d {
-                    Next::In(d, _) => *d,
+                .map(|(name, s)| (name, s.get_next()))
+                .min_by_key(|(_, next)| match next {
+                    Next::At(d, _) => *d,
                     Next::Unknown => unreachable!(".retain() call above"),
                 });
 
-            let week_next = Scheduler::get_next(&lock.week_schedule);
-            self.revive = false;
+            let week_next = Scheduler::get_next(&lock.week_scheduler);
             match week_next {
-                Next::In(week_dur, week_cmd) => match schedulers_next {
-                    Some(schedulers_next) => match schedulers_next {
-                        Next::In(schedulers_dur, schedulers_cmd) => match schedulers_dur < week_dur
+                Next::At(week_dur, week_cmd) => match schedulers_next {
+                    Some((name, schedulers_next)) => match schedulers_next {
+                        Next::At(schedulers_dur, schedulers_cmd) => match schedulers_dur < week_dur
                         {
-                            true => (schedulers_dur, schedulers_cmd),
-                            false => (week_dur, week_cmd),
+                            true => (schedulers_dur, schedulers_cmd, Some(name.to_string())),
+                            false => (week_dur, week_cmd, None),
                         },
                         Next::Unknown => unreachable!(".retain() call above"),
                     },
-                    None => (week_dur, week_cmd),
+                    None => (week_dur, week_cmd, None),
                 },
-                Next::Unknown => return SleepTime::Forever,
+                Next::Unknown => match schedulers_next {
+                    Some((name, next)) => match next {
+                        Next::At(dur, cmd) => (dur, cmd, Some(name.to_string())),
+                        Next::Unknown => unreachable!(".retain() call above"),
+                    },
+                    None => return SleepTime::Forever,
+                },
             }
         };
 
-        self.wake_up = Some((Instant::now() + dur, cmd));
-        SleepTime::Duration(dur)
+        if let Some(name) = name {
+            self.last_scheduler = Some((name, has_occurred(date_time)));
+            println!("{:?}", self.last_scheduler);
+        }
+
+        self.wake_up = Some((date_time, cmd));
+        SleepTime::To(date_time)
     }
     fn get_next(&mut self) -> Action {
         match self.get_transition_output() {
@@ -473,14 +487,9 @@ impl State {
         }
     }
     fn wake(&mut self) -> Option<Command> {
-        match self
-            .wake_up
-            .as_ref()?
-            .0
-            .checked_duration_since(Instant::now())
-        {
-            Some(_) => None,
-            None => Some(self.wake_up.take().unwrap().1),
+        match has_occurred(self.wake_up.as_ref()?.0) {
+            false => None,
+            true => Some(self.wake_up.take().unwrap().1),
         }
     }
 }
