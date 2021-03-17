@@ -20,12 +20,36 @@ pub enum Next {
     At(NaiveDateTime, Command),
     Unknown,
 }
+/// Now, represented as a [`chrono::NaiveDateTime`], being lazily evaluated.
+/// Should not be used long after it's initiation, since `now` stays the same after the first call to [`LazyNow::now()`].
+pub struct LazyNow {
+    now: Option<NaiveDateTime>,
+}
+impl LazyNow {
+    pub fn new() -> Self {
+        Self { now: None }
+    }
+    pub fn now(&mut self) -> NaiveDateTime {
+        match self.now {
+            Some(now) => now,
+            None => {
+                self.now = Some(get_naive_now());
+                match self.now {
+                    Some(now) => now,
+                    // SAFETY: the code above just filled the option
+                    None => unsafe { core::hint::unreachable_unchecked() },
+                }
+            }
+        }
+    }
+}
+
 pub trait Scheduler: Debug + Send + Sync {
     /// Advances the internal state when the scheduled time in [`Scheduler::get_next()`] is reached.
     /// You can specify if you want to persist in the list of schedulers or be removed.
     fn advance(&mut self) -> Keep;
     /// Main function. It gets the time to the next occurrence of this Scheduler.
-    fn get_next(&self) -> Next;
+    fn get_next(&self, now: &mut LazyNow) -> Next;
     /// A description to show the user. Should contain information about what this scheduler wakes up to do.
     /// Should only be used as a tip for users.
     fn description(&self) -> &str;
@@ -107,8 +131,8 @@ impl Scheduler for WeekScheduler {
         self.last = Some(get_naive_now());
         Keep::Keep
     }
-    fn get_next(&self) -> Next {
-        let now = get_naive_now();
+    fn get_next(&self, now: &mut LazyNow) -> Next {
+        let now = now.now();
         // todo!("fix this to be naiveDateTime?");
         let next_today = match self.get(now.weekday()) {
             Some(t) => *t,
@@ -433,16 +457,18 @@ impl State {
         let (date_time, cmd, name) = {
             let lock = self.shared.lock().unwrap();
 
+            let mut now = LazyNow::new();
+
             let schedulers_next = lock
                 .ref_schedulers()
                 .iter()
-                .map(|(name, s)| (name, s.get_next()))
+                .map(|(name, s)| (name, s.get_next(&mut now)))
                 .min_by_key(|(_, next)| match next {
                     Next::At(d, _) => *d,
                     Next::Unknown => unreachable!(".retain() call above"),
                 });
 
-            let week_next = Scheduler::get_next(lock.ref_week_schedule());
+            let week_next = Scheduler::get_next(lock.ref_week_schedule(), &mut now);
             match week_next {
                 Next::At(week_dur, week_cmd) => match schedulers_next {
                     Some((name, schedulers_next)) => match schedulers_next {

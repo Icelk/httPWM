@@ -313,6 +313,8 @@ fn create_server<T: VariableOut + Send>(
 
     let local_state = state();
     bindings.bind_page("/get-schedulers", move |buffer, _, _| {
+        let mut now = scheduler::LazyNow::new();
+
         let mut schedulers: Vec<(SchedulerData, Option<Duration>)> = local_state
             .lock()
             .unwrap()
@@ -320,8 +322,8 @@ fn create_server<T: VariableOut + Send>(
             .iter()
             .map(|(name, scheduler)| {
                 (
-                    SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string()),
-                    match scheduler.get_next() {
+                    SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string(), &mut now),
+                    match scheduler.get_next(&mut now) {
                         Next::At(dur, _) => Some(
                             (dur - get_naive_now())
                                 .to_std()
@@ -715,7 +717,7 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for At {
-        fn get_next(&self) -> Next {
+        fn get_next(&self, _: &mut scheduler::LazyNow) -> Next {
             Next::At(self.moment, self.common.get_command().into_inner())
         }
         fn advance(&mut self) -> Keep {
@@ -740,8 +742,8 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryWeek {
-        fn get_next(&self) -> Next {
-            let now = get_naive_now();
+        fn get_next(&self, now: &mut scheduler::LazyNow) -> Next {
+            let now = now.now();
             if self.day == now.weekday() && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 Next::At(
@@ -785,8 +787,8 @@ pub mod extra_schedulers {
         }
     }
     impl Scheduler for EveryDay {
-        fn get_next(&self) -> Next {
-            let now = get_naive_now();
+        fn get_next(&self, now: &mut scheduler::LazyNow) -> Next {
+            let now = now.now();
             if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 Next::At(
@@ -856,8 +858,12 @@ pub struct SchedulerData {
     next_occurrence: String,
 }
 impl SchedulerData {
-    pub fn from_scheduler(scheduler: &dyn Scheduler, name: String) -> Self {
-        let dur = scheduler.get_next();
+    pub fn from_scheduler(
+        scheduler: &dyn Scheduler,
+        name: String,
+        now: &mut scheduler::LazyNow,
+    ) -> Self {
+        let dur = scheduler.get_next(now);
 
         let next_occurrence = match dur {
             Next::At(date_time, _) => {
