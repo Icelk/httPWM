@@ -414,6 +414,7 @@ impl State {
                                     lock.mut_week_scheduler().advance();
                                 }
                             }
+                            self.last_scheduler = None;
                         }
                         let action = self.process(Some(command));
 
