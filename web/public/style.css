@@ -4,6 +4,7 @@
     --txt-second: #9f9f9f;
     --bg-col: #00071f;
     --bg-second: #2f5faf;
+    --bg-dim: #191f32;
     --error: #8c1c2e;
 }
 
@@ -39,7 +40,7 @@ i {
 }
 
 h2 {
-    width: fit-content;
+    width: max-content;
     
     border-bottom: var(--bg-second) 2px solid;
     padding: 0.1em 0.5em;
@@ -60,10 +61,6 @@ body{
     background-color: var(--bg-col);
 }
 
-div {
-    width: fit-content;
-}
-
 table {
   border-collapse: collapse;
   border-style: hidden;
@@ -73,6 +70,9 @@ table {
 .table-round {
     border: 2px solid var(--bg-second);
     border-radius: 0.75em;
+}
+span.table-round {
+    display: inline-block;
 }
 
 td, th {
@@ -141,8 +141,7 @@ span.notification {
     transition: max-height ease-out 0.25s;
     overflow: hidden;
 
-    backdrop-filter: contrast(0.8);
-    -webkit-backdrop-filter: contrast(0.8);
+    background-color: var(--bg-dim);
     border-radius: 0.5em;
 }
 .collapsible-child {

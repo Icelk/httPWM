@@ -21,7 +21,7 @@
 
     <h2 toggle="transitions">Transitions</h2>
     <div id="transitions">
-        <div class="collapsible-child">
+        <span class="collapsible-child">
             <i>Adjust the settings to your liking and either play it or set it as the default for the daily schedules.
                 The following values are defaults for the daily schedule.</i>
             <br>
@@ -42,13 +42,13 @@
                 value="0.5" placeholder="Fade out duration, multiplier of 'time'">
             <button onclick="getAndSetTransition('preview')">Preview now</button>
             <button onclick="getAndSetTransition('set')">Set as daily default</button>
-        </div>
+        </span>
     </div>
 
 
     <h2 toggle="schedulers">Schedulers</h2>
     <div id="schedulers">
-        <div class="collapsible-child">
+        <span class="collapsible-child">
             <i>Schedulers are events that can trigger internal <code>commands</code>. When adding one, it'll associate
                 the
                 current transition above with the event.
@@ -58,7 +58,7 @@
                 action with a scheduler.
                 Keep in mind that the transition will <b>begin</b> at the specified time.</i>
             <br>
-            <div class="table-round center m-top">
+            <span class="table-round center m-top">
                 <table>
                     <thead>
                         <tr>
@@ -77,7 +77,7 @@
                         </tr>
                     </tbody>
                 </table>
-            </div>
+            </span>
             <br>
             <select name="Scheduler kind" id="schedulerKind" onchange="checkSchedulerAddExtras()">
                 <option value="at">At...</option>
@@ -101,13 +101,13 @@
             <input type="text" name="Scheduler description" id="schedulerDescription" placeholder="Description">
 
             <button onclick="getAndAddScheduler()">Add with current transition</button>
-        </div>
+        </span>
     </div>
 
 
     <h2 toggle="timeOfDay">Set scheduler time of day</h2>
     <div id="timeOfDay">
-        <div class="collapsible-child">
+        <span class="collapsible-child">
             <i>Sets the scheduled time (if any) to perform set transition (if you haven't changed it, reload this page
                 and
                 press
@@ -130,7 +130,9 @@
             <input type="text" style="width: 6em;" name="Day Time" id="dayTime" placeholder="HH:MM[:SS]">
             <button onclick="getAndSendDayTime()">Change!</button>
 
-            <div class="table-round center m-top">
+            <br>
+
+            <span class="table-round center m-top">
                 <table>
                     <tbody>
                         <tr>
@@ -167,8 +169,8 @@
                         </tr>
                     </tbody>
                 </table>
-            </div>
-        </div>
+            </span>
+        </span>
     </div>
     <br>
 </body>
