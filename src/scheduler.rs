@@ -348,12 +348,9 @@ impl State {
                 Command::ChangeDayTimer(day, time) => {
                     // change time of day
                     {
-                        *self
-                            .shared
-                            .lock()
-                            .unwrap()
-                            .mut_week_scheduler()
-                            .get_mut(day) = time;
+                        let mut lock = self.shared.lock().unwrap();
+                        *lock.mut_week_scheduler().get_mut(day) = time;
+                        lock.mut_week_scheduler().last = None;
                     }
                     self.get_next()
                 }
