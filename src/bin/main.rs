@@ -484,6 +484,7 @@ pub mod save_state {
         strength: Option<f64>,
         schedulers: Vec<AddSchedulerData>,
         week_scheduler: Option<WeekSchedulerData>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         current_transition: Option<TransitionData>,
     }
     impl Data {
