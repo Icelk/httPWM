@@ -452,6 +452,7 @@ impl State {
         }
     }
     fn queue_sleep(&mut self) -> SleepTime {
+        self.last_scheduler = None;
         let (date_time, cmd, name) = {
             let lock = self.shared.lock().unwrap();
 
