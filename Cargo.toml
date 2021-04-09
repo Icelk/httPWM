@@ -19,16 +19,18 @@ name = "httpwm"
 rppal = "^0.11"
 ron = "^0.6"
 kvarn = { path = "kvarn", default-features = false, optional = true, features = ["no-cache", "fs"] }
-kvarn_extensions = { path = "kvarn/kvarn_extensions", default-features = false, optional = true }
+# kvarn_extensions = { path = "kvarn/kvarn_extensions", default-features = false, optional = true }
 chrono = "^0.4"
 serde = { version = "^1", optional = true, features = ["derive"] }
 serde_json = { version = "^1", optional = true }
 percent-encoding = { version = "^2", optional = true }
+tokio = { version = "^1", optional = true, features = ["macros"] }
+futures = { version = "^0.3", optional = true }
 
 [features]
 default = ["bin"]
 bin = ["web"]
 
-web = ["kvarn", "kvarn_extensions", "json", "percent-encoding"]
+web = ["kvarn", "tokio", "futures", "json", "percent-encoding"]
 json = ["serde", "serde_json"]
 test = []

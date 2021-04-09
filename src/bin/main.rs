@@ -1,9 +1,10 @@
 use chrono::{NaiveTime, Weekday};
 use httpwm::*;
+#[cfg(feature = "web")]
 use kvarn::prelude::*;
+use kvarn::utility::default_error_response;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::Write,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
@@ -124,7 +125,7 @@ fn main() {
                     };
                     drop(saved);
 
-                    let mut file = match fs::File::create(SAVE_PATH) {
+                    let mut file = match std::fs::File::create(SAVE_PATH) {
                         Err(err) => {
                             eprintln!("Failed to create file {}", err);
                             continue;
@@ -139,215 +140,286 @@ fn main() {
         });
     }
 
-    create_server(controller, saved_state, shared).run();
+    #[cfg(feature = "web")]
+    run(controller, saved_state, shared);
 }
 
-fn get_query_value<'a>(
-    req: &'a http::Request<&[u8]>,
-    buffer: &mut Vec<u8>,
-    cache: &mut kvarn::cache::types::FsCache,
-    query: &str,
-) -> Option<&'a str> {
+#[cfg(feature = "web")]
+fn get_query_value<'a, T>(req: &'a http::Request<T>, query: &str) -> Option<&'a str> {
     let queries = req.uri().query().map(|s| parse::format_query(s));
     let value = queries.as_ref().and_then(|q| q.get(query));
 
-    match value {
-        Some(value) => Some(*value),
-        None => {
-            // Write err
-            utility::write_error(buffer, 400, cache);
-            None
-        }
-    }
+    value.map(|s| *s)
 }
 
+#[cfg(feature = "web")]
+#[tokio::main(flavor = "current_thread")]
+async fn run<T: VariableOut + Send>(
+    controller: Arc<Mutex<Controller<T>>>,
+    save_state: Arc<Mutex<save_state::DataWrapper>>,
+    shared: Arc<Mutex<SharedState>>,
+) {
+    create_server(controller, save_state, shared).run().await
+}
+
+#[cfg(feature = "web")]
 fn create_server<T: VariableOut + Send>(
     controller: Arc<Mutex<Controller<T>>>,
     save_state: Arc<Mutex<save_state::DataWrapper>>,
     shared: Arc<Mutex<SharedState>>,
 ) -> kvarn::Config {
-    let mut bindings = FunctionBindings::new();
+    let mut extensions = Extensions::new();
 
     let state = { move || Arc::clone(&shared) };
     let ctl = move || Arc::clone(&controller);
 
     let saved = move || Arc::clone(&save_state);
 
+    fn r200() -> FatResponse {
+        (
+            Response::new(Bytes::new()),
+            ClientCachePreference::None,
+            ServerCachePreference::None,
+            CompressPreference::None,
+        )
+    }
+    async fn read_body(request: &mut FatRequest) -> io::Result<Bytes> {
+        request.body_mut().read_to_bytes().await
+    }
+
     let controller = ctl();
     let save = saved();
-    bindings.bind_page("/clear-schedulers", move |_, _, _| {
-        {
-            controller.lock().unwrap().send(Command::ClearAllSchedulers);
-        }
-        save.lock().unwrap().get_mut().mut_schedulers().clear();
-
-        (utility::ContentType::PlainText, Cached::Dynamic)
-    });
+    extensions.add_prepare_single(
+        "/clear-schedulers".to_string(),
+        prepare!(_req, _host, _path, _addr, save controller, {
+            {
+                controller.lock().unwrap().send(Command::ClearAllSchedulers);
+            }
+            save.lock().unwrap().get_mut().mut_schedulers().clear();
+            r200()
+        }),
+    );
 
     let controller = ctl();
     let save = saved();
-    bindings.bind_page("/set-strength", move |buffer, req, cache| {
-        get_query_value(req, buffer, cache, "strength")
-            .and_then(|value| value.parse().ok())
-            .map(|f| {
-                controller
-                    .lock()
-                    .unwrap()
-                    .send(Command::Set(Strength::new_clamped(f)));
-                save.lock()
-                    .unwrap()
-                    .get_mut()
-                    .set_strength(Strength::new_clamped(f));
-            });
-        (utility::ContentType::Html, Cached::Dynamic)
-    });
-    let controller = ctl();
-    let save = saved();
-    bindings.bind_page("/set-day-time", move |buffer, req, cache| {
-        let day_data = serde_json::from_slice(req.body()).ok();
-        let command = day_data
-            .as_ref()
-            .and_then(|set_day: &DayData| set_day.parse());
-
-        match command {
-            Some((day, time)) => {
-                println!("Changed time of {} to {:?}", day, time);
-
-                {
-                    let mut lock = save.lock().unwrap();
-                    let week_scheduler = lock.get_mut().mut_week_scheduler();
-                    *week_scheduler.get_mut(day) =
-                        time.map(|time| time.format("%H:%M:%S").to_string());
+    extensions.add_prepare_single(
+        "/set-strength".to_string(),
+        prepare!(request, host, _path, _addr, save controller, {
+            match get_query_value(request,  "strength")
+                .and_then(|value| value.parse().ok()) {
+                    Some(f) => {
+                    controller
+                        .lock()
+                        .unwrap()
+                        .send(Command::Set(Strength::new_clamped(f)));
+                    save.lock()
+                        .unwrap()
+                        .get_mut()
+                        .set_strength(Strength::new_clamped(f));
+                },
+                None => return default_error_response(StatusCode::BAD_REQUEST, host).await,
                 }
-                {
-                    let lock = controller.lock().unwrap();
-                    lock.send(Command::ChangeDayTimer(day, time));
+            r200()
+        }),
+    );
+    let controller = ctl();
+    let save = saved();
+    extensions.add_prepare_single(
+        "/set-day-time".to_string(),
+        prepare!( request,host, _path, _addr, save controller,  {
+             let body = match read_body(request).await {
+                 Ok(b) => b,
+                 Err(_) => return default_error_response(StatusCode::BAD_REQUEST, host).await,
+             };
+
+            let day_data = serde_json::from_slice(&body).ok();
+            let command = day_data
+                .as_ref()
+                .and_then(|set_day: &datas::DayData| set_day.parse());
+
+            match command {
+                Some((day, time)) => {
+                    info!("Changed time of {} to {:?}", day, time);
+
+                    {
+                        let mut lock = save.lock().unwrap();
+                        let week_scheduler = lock.get_mut().mut_week_scheduler();
+                        *week_scheduler.get_mut(day) =
+                            time.map(|time| time.format("%H:%M:%S").to_string());
+                    }
+                    {
+                        let lock = controller.lock().unwrap();
+                        lock.send(Command::ChangeDayTimer(day, time));
+                    }
                 }
+                None =>
+                    return default_error_response(StatusCode::BAD_REQUEST, host).await
             }
-            None => {
-                utility::write_error(buffer, 400, cache);
-            }
-        }
-        (utility::ContentType::Html, Cached::Dynamic)
-    });
+            r200()
+        }),
+    );
 
     let controller = ctl();
     let save = saved();
-    bindings.bind_page("/transition", move |buffer, req, cache| {
-        let queries = req.uri().query().map(|q| parse::format_query(q));
-        let action = queries.as_ref().and_then(|q| q.get("action")).map(|a| *a);
+    extensions.add_prepare_single(
+        "/transition".to_string(),
+        prepare!(request, host, _path, _addr, save controller, {
+            let body = match read_body(request).await {
+                Ok(b) => b,
+                Err(_) => return default_error_response(StatusCode::BAD_REQUEST, host).await,
+            };
 
-        let transition = serde_json::from_slice(req.body())
-            .ok()
-            .and_then(|set_transition: TransitionData| set_transition.to_transition());
-        let transition = match transition {
-            Some(transition) => transition,
-            None => {
-                utility::write_error(buffer, 400, cache);
-                return (utility::ContentType::Html, Cached::Dynamic);
+            let queries = request.uri().query().map(|q| parse::format_query(q));
+            let action = queries.as_ref().and_then(|q| q.get("action")).map(|a| *a);
+            let transition = serde_json::from_slice(&body)
+                .ok()
+                .and_then(|set_transition: datas::TransitionData| set_transition.to_transition());
+            let transition = match transition {
+                Some(transition) => transition,
+                None => {
+
+                    return default_error_response(StatusCode::BAD_REQUEST, host).await
+                }
+            };
+
+            match action {
+                Some("set") => {
+                    save.lock()
+                        .unwrap()
+                        .get_mut()
+                        .mut_week_scheduler()
+                        .transition = datas::TransitionData::from_transition(&transition);
+                    info!("Setting default transition.");
+                    {
+                        controller
+                            .lock()
+                            .unwrap()
+                            .send(Command::ChangeDayTimerTransition(transition));
+                    }
+                }
+                Some("preview") => {
+                    info!("Applying transition.");
+                    {
+                        controller
+                            .lock()
+                            .unwrap()
+                            .send(Command::SetTransition(transition));
+                    }
+                }
+                _ => {
+                    return default_error_response(StatusCode::BAD_REQUEST, host).await
+                }
             }
+
+            r200()
+        }),
+    );
+
+    let local_state = state();
+    extensions.add_prepare_single(
+        "/get-state".to_string(),
+        prepare!(_request, _host, _path, _addr, local_state, {
+            let state = datas::StateData::from_shared_state(&*local_state.lock().unwrap());
+            let mut body = utility::WriteableBytes::new(BytesMut::with_capacity(1024));
+            serde_json::to_writer(&mut body, &state).expect("failed to parse shared state");
+            let body = body.into_inner().freeze();
+            (
+                Response::new(body),
+                ClientCachePreference::None,
+                ServerCachePreference::None,
+                CompressPreference::Full,
+            )
+        }),
+    );
+
+    let controller = ctl();
+    let save = saved();
+    extensions.add_prepare_single(
+        "/add-scheduler".to_string(),
+        prepare!(request, host, _path, _addr, save controller, {
+        let body = match read_body(request).await {
+            Ok(b) => b,
+            Err(_) => return default_error_response(StatusCode::BAD_REQUEST, host).await,
         };
 
-        match action {
-            Some("set") => {
-                save.lock()
-                    .unwrap()
-                    .get_mut()
-                    .mut_week_scheduler()
-                    .transition = TransitionData::from_transition(&transition);
-                println!("Setting default transition.");
-                {
-                    controller
-                        .lock()
-                        .unwrap()
-                        .send(Command::ChangeDayTimerTransition(transition));
-                }
-            }
-            Some("preview") => {
-                println!("Applying transition.");
-                {
-                    controller
-                        .lock()
-                        .unwrap()
-                        .send(Command::SetTransition(transition));
-                }
-            }
-            _ => {
-                utility::write_error(buffer, 400, cache);
-            }
-        }
+                    let data = serde_json::from_slice(&body).ok();
+                    let command = data.and_then(|data: datas::AddSchedulerData| {
+                        let data_clone = data.clone();
+                        data.into_command(false).map(|cmd| (data_clone, cmd))
+                    });
 
-        (utility::ContentType::Html, Cached::Dynamic)
-    });
+                    match command {
+                        Some((data, cmd)) => {
+                            {
+                                controller.lock().unwrap().send(cmd);
+                            }
+                            save.lock().unwrap().get_mut().mut_schedulers().push(data);
+                        }
+                        None => {
+                            return default_error_response(StatusCode::BAD_REQUEST, host).await
+                        }
+                    }
+
+                    r200()
+                }),
+    );
 
     let local_state = state();
-    bindings.bind_page("/get-state", move |buffer, _, _| {
-        let state = StateData::from_shared_state(&*local_state.lock().unwrap());
-        serde_json::to_writer(buffer, &state).expect("failed to parse shared state");
-        (utility::ContentType::JSON, Cached::Dynamic)
-    });
+    extensions.add_prepare_single(
+        "/get-schedulers".to_string(),
+        prepare!(request, host, _path, _addr, local_state, {
+            let mut now = scheduler::LazyNow::new();
 
-    let controller = ctl();
-    let save = saved();
-    bindings.bind_page("/add-scheduler", move |buffer, req, cache| {
-        let data = serde_json::from_slice(req.body()).ok();
-        let command = data.and_then(|data: AddSchedulerData| {
-            let data_clone = data.clone();
-            data.into_command(false).map(|cmd| (data_clone, cmd))
-        });
-
-        match command {
-            Some((data, cmd)) => {
-                {
-                    controller.lock().unwrap().send(cmd);
-                }
-                save.lock().unwrap().get_mut().mut_schedulers().push(data);
-            }
-            None => {
-                utility::write_error(buffer, 400, cache);
-            }
-        }
-
-        (utility::ContentType::Html, Cached::Dynamic)
-    });
-
-    let local_state = state();
-    bindings.bind_page("/get-schedulers", move |buffer, _, _| {
-        let mut now = scheduler::LazyNow::new();
-
-        let mut schedulers: Vec<(SchedulerData, Option<Duration>)> = local_state
-            .lock()
-            .unwrap()
-            .ref_schedulers()
-            .iter()
-            .map(|(name, scheduler)| {
-                (
-                    SchedulerData::from_scheduler(scheduler.as_ref(), name.to_string(), &mut now),
-                    match scheduler.get_next(&mut now) {
-                        Next::At(dur, _) => Some(
-                            (dur - get_naive_now())
-                                .to_std()
-                                .unwrap_or(Duration::new(0, 0)),
+            let mut schedulers: Vec<(datas::SchedulerData, Option<Duration>)> = local_state
+                .lock()
+                .unwrap()
+                .ref_schedulers()
+                .iter()
+                .map(|(name, scheduler)| {
+                    (
+                        datas::SchedulerData::from_scheduler(
+                            scheduler.as_ref(),
+                            name.to_string(),
+                            &mut now,
                         ),
-                        Next::Unknown => None,
-                    },
-                )
-            })
-            .collect();
+                        match scheduler.get_next(&mut now) {
+                            Next::At(dur, _) => Some(
+                                (dur - get_naive_now())
+                                    .to_std()
+                                    .unwrap_or(Duration::new(0, 0)),
+                            ),
+                            Next::Unknown => None,
+                        },
+                    )
+                })
+                .collect();
 
-        schedulers.sort_by(|(_, d1), (_, d2)| d1.cmp(d2));
+            schedulers.sort_by(|(_, d1), (_, d2)| d1.cmp(d2));
 
-        let schedulers: Vec<SchedulerData> = schedulers.into_iter().map(|(data, _)| data).collect();
+            let schedulers: Vec<datas::SchedulerData> =
+                schedulers.into_iter().map(|(data, _)| data).collect();
 
-        serde_json::to_writer(buffer, &schedulers).expect("failed to write to Vec?");
-        (utility::ContentType::PlainText, Cached::Dynamic)
-    });
+            let mut buffer = utility::WriteableBytes::new(BytesMut::with_capacity(1024));
+            serde_json::to_writer(&mut buffer, &schedulers).expect("failed to write to Vec?");
+
+            (
+                Response::new(buffer.into_inner().freeze()),
+                ClientCachePreference::None,
+                ServerCachePreference::None,
+                CompressPreference::Full,
+            )
+        }),
+    );
 
     let controller = ctl();
-    bindings.bind_page("/remove-scheduler", move |buffer, req, cache| {
-        get_query_value(req, buffer, cache, "name").map(|name| {
-            match percent_encoding::percent_decode_str(name).decode_utf8() {
-                Ok(s) => {
+    extensions.add_prepare_single(
+        "/remove-scheduler".to_string(),
+        prepare!(request, host, _path, _addr, controller, {
+            match get_query_value(request, "name")
+                .map(|name| percent_encoding::percent_decode_str(name).decode_utf8())
+                .and_then(Result::ok)
+            {
+                Some(s) => {
                     {
                         controller
                             .lock()
@@ -361,20 +433,18 @@ fn create_server<T: VariableOut + Send>(
                     //     .mut_schedulers()
                     //     .retain(|scheduler| scheduler.name != s);
                 }
-                Err(_) => {
-                    utility::write_error(buffer, 400, cache);
-                }
-            };
-        });
-        (utility::ContentType::Html, Cached::Dynamic)
-    });
+                None => return default_error_response(StatusCode::BAD_REQUEST, host).await,
+            }
 
-    let localhost = Host::no_certification("web", Some(bindings));
+            r200()
+        }),
+    );
+
+    let localhost = Host::no_certification("localhost", PathBuf::from("web"), extensions);
     let hosts = HostData::builder(localhost).build();
-    let ports = vec![(8080, ConnectionSecurity::http1(), hosts)];
+    let ports = vec![HostDescriptor::new(8080, hosts)];
 
-    let mut config = Config::new(ports);
-    config.mount_extension(kvarn_extensions::cache);
+    let config = Config::new(ports);
     config
 }
 
@@ -398,7 +468,7 @@ pub mod save_state {
         pub fri: Option<String>,
         pub sat: Option<String>,
         pub sun: Option<String>,
-        pub transition: TransitionData,
+        pub transition: datas::TransitionData,
     }
     impl WeekSchedulerData {
         pub fn get_mut(&mut self, day: Weekday) -> &mut Option<String> {
@@ -427,7 +497,7 @@ pub mod save_state {
                 fri: fmt_time!(scheduler.fri),
                 sat: fmt_time!(scheduler.sat),
                 sun: fmt_time!(scheduler.sun),
-                transition: TransitionData::from_transition(&scheduler.transition),
+                transition: datas::TransitionData::from_transition(&scheduler.transition),
             }
         }
         pub fn to_scheduler(&self) -> Option<WeekScheduler> {
@@ -482,10 +552,10 @@ pub mod save_state {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Data {
         strength: Option<f64>,
-        schedulers: Vec<AddSchedulerData>,
+        schedulers: Vec<datas::AddSchedulerData>,
         week_scheduler: Option<WeekSchedulerData>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        current_transition: Option<TransitionData>,
+        current_transition: Option<datas::TransitionData>,
     }
     impl Data {
         pub fn read_from_file<P: AsRef<Path>>(
@@ -493,7 +563,7 @@ pub mod save_state {
             week_scheduler: &WeekScheduler,
         ) -> io::Result<Self> {
             fn read(path: &Path) -> io::Result<Data> {
-                let file = fs::File::open(path)?;
+                let file = std::fs::File::open(path)?;
                 ron::de::from_reader(file)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
             }
@@ -527,7 +597,7 @@ pub mod save_state {
             if let Some(transition) = self
                 .current_transition
                 .as_ref()
-                .and_then(TransitionData::to_transition)
+                .and_then(datas::TransitionData::to_transition)
             {
                 controller.send(Command::SetTransition(transition));
             }
@@ -542,10 +612,10 @@ pub mod save_state {
                 .map(|f| Strength::new_clamped(f))
         }
 
-        pub fn ref_schedulers(&self) -> &Vec<AddSchedulerData> {
+        pub fn ref_schedulers(&self) -> &Vec<datas::AddSchedulerData> {
             &self.schedulers
         }
-        pub fn mut_schedulers(&mut self) -> &mut Vec<AddSchedulerData> {
+        pub fn mut_schedulers(&mut self) -> &mut Vec<datas::AddSchedulerData> {
             &mut self.schedulers
         }
 
@@ -573,96 +643,186 @@ pub mod save_state {
                 None => other.is_none(),
             }
         }
-        pub fn set_transition(&mut self, new: Option<&Transition>) -> Option<TransitionData> {
+        pub fn set_transition(
+            &mut self,
+            new: Option<&Transition>,
+        ) -> Option<datas::TransitionData> {
             match new {
                 None => self.current_transition.take(),
                 Some(transition) => self
                     .current_transition
-                    .replace(TransitionData::from_transition(transition)),
+                    .replace(datas::TransitionData::from_transition(transition)),
             }
         }
     }
 }
 
-#[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DayData {
-    day: String,
-    time: Option<String>,
-}
-impl DayData {
-    pub fn parse(&self) -> Option<(Weekday, Option<NaiveTime>)> {
-        let day: chrono::Weekday = self.day.parse().ok()?;
-        let time = match self.time.as_ref() {
-            Some(time) => Some(parse_time(&time)?),
-            None => None,
-        };
-        Some((day, time))
+pub mod datas {
+    use super::*;
+    #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct DayData {
+        day: String,
+        time: Option<String>,
     }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct TransitionData {
-    from: f64,
-    to: f64,
-    time: f64,
-    interpolation: String,
-    extras: Vec<String>,
-}
-impl TransitionData {
-    pub fn to_transition(&self) -> Option<Transition> {
-        let from = Strength::new_clamped(self.from);
-        let to = Strength::new_clamped(self.to);
-        let time = Duration::from_secs_f64(self.time);
-
-        let interpolation = TransitionInterpolation::from_str(&self.interpolation, &self.extras)?;
-        Some(Transition {
-            from,
-            to,
-            time,
-            interpolation,
-        })
-    }
-
-    pub fn from_transition(transition: &Transition) -> Self {
-        let mut extras = Vec::with_capacity(4);
-
-        transition.interpolation.apply_extras(&mut extras);
-
-        Self {
-            from: Strength::clone(&transition.from).into_inner(),
-            to: Strength::clone(&transition.to).into_inner(),
-            time: transition.time.as_secs_f64(),
-            interpolation: transition.interpolation.as_str().to_string(),
-            extras,
+    impl DayData {
+        pub fn parse(&self) -> Option<(Weekday, Option<NaiveTime>)> {
+            let day: chrono::Weekday = self.day.parse().ok()?;
+            let time = match self.time.as_ref() {
+                Some(time) => Some(parse_time(&time)?),
+                None => None,
+            };
+            Some((day, time))
         }
     }
-}
 
-#[derive(Debug, Serialize)]
-pub struct StateData {
-    strength: f64,
-    days: HashMap<String, Option<String>>,
-    transition: TransitionData,
-}
-impl StateData {
-    pub fn from_shared_state(state: &SharedState) -> Self {
-        let mut days = HashMap::with_capacity(7);
-        let mut day = chrono::Weekday::Mon;
-        for _ in 0..7 {
-            days.insert(
-                weekday_to_lowercase_str(&day).to_string(),
-                state
-                    .ref_week_schedule()
-                    .get(day)
-                    .map(|time| time.to_string()),
-            );
-            day = day.succ();
+    #[derive(Deserialize, Serialize, Debug, Clone)]
+    pub struct TransitionData {
+        from: f64,
+        to: f64,
+        time: f64,
+        interpolation: String,
+        extras: Vec<String>,
+    }
+    impl TransitionData {
+        pub fn to_transition(&self) -> Option<Transition> {
+            let from = Strength::new_clamped(self.from);
+            let to = Strength::new_clamped(self.to);
+            let time = Duration::from_secs_f64(self.time);
+
+            let interpolation =
+                TransitionInterpolation::from_str(&self.interpolation, &self.extras)?;
+            Some(Transition {
+                from,
+                to,
+                time,
+                interpolation,
+            })
         }
 
-        Self {
-            strength: Strength::clone(state.get_strength()).into_inner(),
-            days,
-            transition: TransitionData::from_transition(&state.ref_week_schedule().transition),
+        pub fn from_transition(transition: &Transition) -> Self {
+            let mut extras = Vec::with_capacity(4);
+
+            transition.interpolation.apply_extras(&mut extras);
+
+            Self {
+                from: Strength::clone(&transition.from).into_inner(),
+                to: Strength::clone(&transition.to).into_inner(),
+                time: transition.time.as_secs_f64(),
+                interpolation: transition.interpolation.as_str().to_string(),
+                extras,
+            }
+        }
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct StateData {
+        strength: f64,
+        days: HashMap<String, Option<String>>,
+        transition: TransitionData,
+    }
+    impl StateData {
+        pub fn from_shared_state(state: &SharedState) -> Self {
+            let mut days = HashMap::with_capacity(7);
+            let mut day = chrono::Weekday::Mon;
+            for _ in 0..7 {
+                days.insert(
+                    weekday_to_lowercase_str(&day).to_string(),
+                    state
+                        .ref_week_schedule()
+                        .get(day)
+                        .map(|time| time.to_string()),
+                );
+                day = day.succ();
+            }
+
+            Self {
+                strength: Strength::clone(state.get_strength()).into_inner(),
+                days,
+                transition: TransitionData::from_transition(&state.ref_week_schedule().transition),
+            }
+        }
+    }
+    #[derive(Debug, Deserialize, Serialize, Clone)]
+    pub struct AddSchedulerData {
+        pub kind: String,
+        pub time: String,
+        pub name: String,
+        pub description: String,
+        pub extras: Vec<String>,
+        pub transition: TransitionData,
+    }
+    impl AddSchedulerData {
+        pub fn into_command(self, allow_past: bool) -> Option<Command> {
+            let transition = self.transition.to_transition()?;
+            let time = parse_time(&self.time)?;
+            // Unwrap is ok, since we know `SetTransition` is clonable
+            let run_command = ClonableCommand::new(Command::SetTransition(transition)).unwrap();
+            let common = extra_schedulers::Common::new(self.description, run_command);
+
+            let scheduler: Box<dyn Scheduler> = match self.kind.as_str() {
+                "at" if self.extras.len() == 1 => {
+                    let date_time =
+                        chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
+                            .ok()?
+                            .and_time(time);
+                    if has_occurred(date_time) && !allow_past {
+                        return None;
+                    }
+                    Box::new(extra_schedulers::At::new(common, date_time))
+                }
+                "every-week" if self.extras.len() == 1 => Box::new(
+                    extra_schedulers::EveryWeek::new(common, time, self.extras[0].parse().ok()?),
+                ),
+                "every-day" => Box::new(extra_schedulers::EveryDay::new(common, time)),
+                _ => return None,
+            };
+            Some(Command::AddReplaceScheduler(self.name, scheduler))
+        }
+    }
+    #[derive(Debug, Serialize)]
+    pub struct SchedulerData {
+        name: String,
+        description: String,
+        kind: String,
+        next_occurrence: String,
+    }
+    impl SchedulerData {
+        pub fn from_scheduler(
+            scheduler: &dyn Scheduler,
+            name: String,
+            now: &mut scheduler::LazyNow,
+        ) -> Self {
+            let dur = scheduler.get_next(now);
+
+            let next_occurrence = match dur {
+                Next::At(date_time, _) => {
+                    let dur = date_time - get_naive_now();
+                    if dur.num_days() > 0 {
+                        (get_naive_now() + dur)
+                            .format("%Y-%m-%d %H:%M:%S")
+                            .to_string()
+                    } else if dur.num_hours() > 0 {
+                        format!("In {} hours", dur.num_hours())
+                    } else if dur.num_minutes() > 0 {
+                        format!("In {} minutes", dur.num_minutes())
+                    } else {
+                        format!("In {} seconds", dur.num_seconds())
+                    }
+                }
+                Next::Unknown => "unknown".to_string(),
+            };
+
+            // let next_occurrence = (chrono::Local::now()
+            //     + chrono::Duration::from_std(scheduler.get_next().0)
+            //         .expect("std duration overflowed!"))
+            // .to_rfc3339();
+
+            Self {
+                name,
+                description: scheduler.description().to_string(),
+                kind: scheduler.kind().to_string(),
+                next_occurrence,
+            }
         }
     }
 }
@@ -813,91 +973,6 @@ pub mod extra_schedulers {
         }
         fn kind(&self) -> &str {
             "Every day at"
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AddSchedulerData {
-    kind: String,
-    time: String,
-    name: String,
-    description: String,
-    extras: Vec<String>,
-    transition: TransitionData,
-}
-impl AddSchedulerData {
-    pub fn into_command(self, allow_past: bool) -> Option<Command> {
-        let transition = self.transition.to_transition()?;
-        let time = parse_time(&self.time)?;
-        // Unwrap is ok, since we know `SetTransition` is clonable
-        let run_command = ClonableCommand::new(Command::SetTransition(transition)).unwrap();
-        let common = extra_schedulers::Common::new(self.description, run_command);
-
-        let scheduler: Box<dyn Scheduler> =
-            match self.kind.as_str() {
-                "at" if self.extras.len() == 1 => {
-                    let date_time =
-                        chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
-                            .ok()?
-                            .and_time(time);
-                    if has_occurred(date_time) && !allow_past {
-                        return None;
-                    }
-                    Box::new(extra_schedulers::At::new(common, date_time))
-                }
-                "every-week" if self.extras.len() == 1 => Box::new(
-                    extra_schedulers::EveryWeek::new(common, time, self.extras[0].parse().ok()?),
-                ),
-                "every-day" => Box::new(extra_schedulers::EveryDay::new(common, time)),
-                _ => return None,
-            };
-        Some(Command::AddReplaceScheduler(self.name, scheduler))
-    }
-}
-#[derive(Debug, Serialize)]
-pub struct SchedulerData {
-    name: String,
-    description: String,
-    kind: String,
-    next_occurrence: String,
-}
-impl SchedulerData {
-    pub fn from_scheduler(
-        scheduler: &dyn Scheduler,
-        name: String,
-        now: &mut scheduler::LazyNow,
-    ) -> Self {
-        let dur = scheduler.get_next(now);
-
-        let next_occurrence = match dur {
-            Next::At(date_time, _) => {
-                let dur = date_time - get_naive_now();
-                if dur.num_days() > 0 {
-                    (get_naive_now() + dur)
-                        .format("%Y-%m-%d %H:%M:%S")
-                        .to_string()
-                } else if dur.num_hours() > 0 {
-                    format!("In {} hours", dur.num_hours())
-                } else if dur.num_minutes() > 0 {
-                    format!("In {} minutes", dur.num_minutes())
-                } else {
-                    format!("In {} seconds", dur.num_seconds())
-                }
-            }
-            Next::Unknown => "unknown".to_string(),
-        };
-
-        // let next_occurrence = (chrono::Local::now()
-        //     + chrono::Duration::from_std(scheduler.get_next().0)
-        //         .expect("std duration overflowed!"))
-        // .to_rfc3339();
-
-        Self {
-            name,
-            description: scheduler.description().to_string(),
-            kind: scheduler.kind().to_string(),
-            next_occurrence,
         }
     }
 }
