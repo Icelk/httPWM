@@ -16,7 +16,8 @@ If you want to use only the library, check out [main.rs](src/bin/main.rs) for a 
 
 > This is the exact circuit I'm using. You can definitely change the MOSFET to a NPN transistor.
 
-A [sample circuit](resources/circuit.cddx) is included (opened using the [Circuit Diagram Web Editor](https://www.circuit-diagram.org/editor/)), which uses the Raspberry Pi's hardware PWM pins and 5V power from it's USB ports.
+A [sample circuit](resources/circuit.cddx) is included (opened using the [Circuit Diagram Web Editor](https://www.circuit-diagram.org/editor/)),
+which uses the Raspberry Pi's hardware PWM pins and 5V power from it's USB ports.
 
 ![circuit](resources/circuit.svg)
 
