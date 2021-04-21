@@ -2,7 +2,7 @@
 
 > httPWM is a web application driven by a custom backend.
 
-The backend consists of my web server [Iselk/kvarn](https://github.com/Iselk/kvarn)
+The backend consists of my web server [Iselk/kvarn](https://github.com/Icelk/kvarn)
 and a custom-built event-loop.
 
 It's goal is to enable software control over PWM output on the Raspberry Pi,
