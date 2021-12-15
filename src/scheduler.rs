@@ -44,6 +44,12 @@ impl LazyNow {
     }
 }
 
+impl Default for LazyNow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub trait Scheduler: Debug + Send + Sync {
     /// Advances the internal state when the scheduled time in [`Scheduler::get_next()`] is reached.
     /// You can specify if you want to persist in the list of schedulers or be removed.
@@ -413,9 +419,8 @@ impl State {
                             }
                             self.last_scheduler = None;
                         }
-                        let action = self.process(Some(command));
 
-                        action
+                        self.process(Some(command))
                     }
                     // check internal transition state; get_output()
                     None => self.get_next(),

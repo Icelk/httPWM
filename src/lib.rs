@@ -55,7 +55,7 @@ impl TransitionInterpolation {
         }
     }
     pub fn from_str<S: AsRef<str>>(string: &str, extras: &[S]) -> Option<Self> {
-        Some(match string.as_ref() {
+        Some(match string {
             "linear" => Self::Linear,
             "sine" => Self::Sine,
             "linear-extra" if extras.len() == 1 => {
