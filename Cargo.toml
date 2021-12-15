@@ -18,7 +18,7 @@ name = "httpwm"
 [dependencies]
 rppal = "^0.11"
 ron = "^0.6"
-kvarn = { path = "kvarn", default-features = false, optional = true, features = ["no-cache", "fs"] }
+kvarn = { version = "^0.3", default-features = false, optional = true }
 chrono = "^0.4"
 serde = { version = "^1", optional = true, features = ["derive"] }
 serde_json = { version = "^1", optional = true }
