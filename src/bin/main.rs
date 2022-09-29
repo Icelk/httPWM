@@ -1,4 +1,3 @@
-use ::chrono::{NaiveTime, Weekday};
 use httpwm::*;
 #[cfg(feature = "web")]
 use kvarn::prelude::*;
@@ -10,6 +9,14 @@ use std::{
 };
 
 const SAVE_PATH: &str = "state.ron";
+static SECOND_FORMAT: &[time::format_description::FormatItem] =
+    time::macros::format_description!("[hour]:[minute]:[second]");
+static MINUTE_FORMAT: &[time::format_description::FormatItem] =
+    time::macros::format_description!("[hour]:[minute]");
+static DATE_FORMAT: &[time::format_description::FormatItem] =
+    time::macros::format_description!("[year]-[month]-[day]");
+static DATE_TIME_FORMAT: &[time::format_description::FormatItem] =
+    time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
 fn main() {
     #[cfg(not(feature = "test"))]
@@ -25,7 +32,7 @@ fn main() {
     #[cfg(feature = "test")]
     let pwm = PrintOut;
 
-    let time = chrono::NaiveTime::from_hms(7, 00, 00);
+    let time = time::Time::from_hms(7, 00, 00).unwrap();
     let day_transition = Transition::default();
 
     let startup_multiplier = Some(0.5);
@@ -111,9 +118,7 @@ fn main() {
 
                     let data = {
                         let config = ron::ser::PrettyConfig::default()
-                            .with_enumerate_arrays(true)
-                            .with_decimal_floats(true)
-                            .with_extensions(ron::extensions::Extensions::IMPLICIT_SOME);
+                            .extensions(ron::extensions::Extensions::IMPLICIT_SOME);
                         match ron::ser::to_string_pretty(saved.get_ref(), config) {
                             Err(err) => {
                                 eprintln!("Failed to save state {}", err);
@@ -173,16 +178,16 @@ fn create_server<T: VariableOut + Send>(
     let mut extensions = Extensions::new();
 
     extensions.with_csp(
-        Csp::new()
+        Csp::default()
             .add(
-                "*",
+                "/*",
                 CspRule::default().script_src(CspValueSet::default().unsafe_inline()),
             )
             .arc(),
     );
 
     let state = { move || Arc::clone(&shared) };
-    let ctl = move || Arc::clone(&controller);
+    let ctl = move || controller.lock().unwrap().to_sender();
 
     let saved = move || Arc::clone(&save_state);
 
@@ -196,169 +201,183 @@ fn create_server<T: VariableOut + Send>(
     let controller = ctl();
     let save = saved();
     extensions.add_prepare_single(
-        "/clear-schedulers".to_string(),
-        prepare!(_req, _host, _path, _addr, move |save, controller| {
-            {
-                controller.lock().unwrap().send(Command::ClearAllSchedulers);
+        "/clear-schedulers",
+        prepare!(
+            _req,
+            _host,
+            _path,
+            _addr,
+            move |save: Arc<Mutex<save_state::DataWrapper>>, controller: ControllerSender| {
+                {
+                    controller.send(Command::ClearAllSchedulers);
+                }
+                save.lock().unwrap().get_mut().mut_schedulers().clear();
+                r200()
             }
-            save.lock().unwrap().get_mut().mut_schedulers().clear();
-            r200()
-        }),
+        ),
     );
 
     let controller = ctl();
     let save = saved();
     extensions.add_prepare_single(
-        "/set-strength".to_string(),
-        prepare!(request, host, _path, _addr, move |save, controller| {
-            match get_query_value(request, "strength").and_then(|value| value.parse().ok()) {
-                Some(f) => {
-                    controller
-                        .lock()
-                        .unwrap()
-                        .send(Command::Set(Strength::new_clamped(f)));
-                    save.lock()
-                        .unwrap()
-                        .get_mut()
-                        .set_strength(Strength::new_clamped(f));
-                }
-                None => {
-                    return default_error_response(
+        "/set-strength",
+        prepare!(
+            request,
+            host,
+            _path,
+            _addr,
+            move |save: Arc<Mutex<save_state::DataWrapper>>, controller: ControllerSender| {
+                match get_query_value(request, "strength").and_then(|value| value.parse().ok()) {
+                    Some(f) => {
+                        controller.send(Command::Set(Strength::new_clamped(f)));
+                        save.lock()
+                            .unwrap()
+                            .get_mut()
+                            .set_strength(Strength::new_clamped(f));
+                    }
+                    None => return default_error_response(
                         StatusCode::BAD_REQUEST,
                         host,
                         Some("must have query key `strength` with a floating point numeric value."),
                     )
-                    .await
+                    .await,
                 }
+                r200()
             }
-            r200()
-        }),
+        ),
     );
     let controller = ctl();
     let save = saved();
     extensions.add_prepare_single(
-        "/set-day-time".to_string(),
-        prepare!(request, host, _path, _addr, move |save, controller| {
-            let body = match read_body(request).await {
-                Ok(b) => b,
-                Err(_) => {
-                    return default_error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        host,
-                        Some("Failed to read request body"),
-                    )
-                    .await
-                }
-            };
-
-            let day_data = serde_json::from_slice(&body).ok();
-            let command = day_data
-                .as_ref()
-                .and_then(|set_day: &datas::DayData| set_day.parse());
-
-            match command {
-                Some((day, time)) => {
-                    info!("Changed time of {} to {:?}", day, time);
-
-                    {
-                        let mut lock = save.lock().unwrap();
-                        let week_scheduler = lock.get_mut().mut_week_scheduler();
-                        *week_scheduler.get_mut(day) =
-                            time.map(|time| time.format("%H:%M:%S").to_string());
+        "/set-day-time",
+        prepare!(
+            request,
+            host,
+            _path,
+            _addr,
+            move |save: Arc<Mutex<save_state::DataWrapper>>, controller: ControllerSender| {
+                let body = match read_body(request).await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        return default_error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            host,
+                            Some("Failed to read request body"),
+                        )
+                        .await
                     }
-                    {
-                        let lock = controller.lock().unwrap();
-                        lock.send(Command::ChangeDayTimer(day, time));
+                };
+
+                let day_data = serde_json::from_slice(&body).ok();
+                let command = day_data
+                    .as_ref()
+                    .and_then(|set_day: &datas::DayData| set_day.parse());
+
+                match command {
+                    Some((day, time)) => {
+                        info!("Changed time of {:?} to {:?}", day, time);
+
+                        {
+                            let mut lock = save.lock().unwrap();
+                            let week_scheduler = lock.get_mut().mut_week_scheduler();
+                            *week_scheduler.get_mut(day) =
+                                time.map(|time| time.format(&SECOND_FORMAT).unwrap());
+                        }
+                        {
+                            controller.send(Command::ChangeDayTimer(day, time));
+                        }
+                    }
+                    None => {
+                        return default_error_response(
+                            StatusCode::BAD_REQUEST,
+                            host,
+                            Some("Failed to serialize body"),
+                        )
+                        .await
                     }
                 }
-                None => {
-                    return default_error_response(
-                        StatusCode::BAD_REQUEST,
-                        host,
-                        Some("Failed to serialize body"),
-                    )
-                    .await
-                }
+                r200()
             }
-            r200()
-        }),
+        ),
     );
 
     let controller = ctl();
     let save = saved();
     extensions.add_prepare_single(
-        "/transition".to_string(),
-        prepare!(request, host, _path, _addr, move |save, controller| {
-            let body = match read_body(request).await {
-                Ok(b) => b,
-                Err(_) => {
-                    return default_error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        host,
-                        Some("Failed to read request body"),
-                    )
-                    .await
-                }
-            };
+        "/transition",
+        prepare!(
+            request,
+            host,
+            _path,
+            _addr,
+            move |save: Arc<Mutex<save_state::DataWrapper>>, controller: ControllerSender| {
+                let body = match read_body(request).await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        return default_error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            host,
+                            Some("Failed to read request body"),
+                        )
+                        .await
+                    }
+                };
 
-            let action = get_query_value(request, "action");
-            let transition = serde_json::from_slice(&body)
-                .ok()
-                .and_then(|set_transition: datas::TransitionData| set_transition.to_transition());
-            let transition = match transition {
-                Some(transition) => transition,
-                None => {
-                    return default_error_response(
-                        StatusCode::BAD_REQUEST,
-                        host,
-                        Some("Failed to serialize body"),
-                    )
-                    .await
-                }
-            };
+                let action = get_query_value(request, "action");
+                let transition = serde_json::from_slice(&body).ok().and_then(
+                    |set_transition: datas::TransitionData| set_transition.to_transition(),
+                );
+                let transition = match transition {
+                    Some(transition) => transition,
+                    None => {
+                        return default_error_response(
+                            StatusCode::BAD_REQUEST,
+                            host,
+                            Some("Failed to serialize body"),
+                        )
+                        .await
+                    }
+                };
 
-            match action.as_deref() {
-                Some("set") => {
-                    save.lock()
-                        .unwrap()
-                        .get_mut()
-                        .mut_week_scheduler()
-                        .transition = datas::TransitionData::from_transition(&transition);
-                    info!("Setting default transition.");
-                    {
-                        controller
-                            .lock()
+                match action.as_deref() {
+                    Some("set") => {
+                        save.lock()
                             .unwrap()
-                            .send(Command::ChangeDayTimerTransition(transition));
+                            .get_mut()
+                            .mut_week_scheduler()
+                            .transition = datas::TransitionData::from_transition(&transition);
+                        info!("Setting default transition.");
+                        {
+                            controller.send(Command::ChangeDayTimerTransition(transition));
+                        }
+                    }
+                    Some("preview") => {
+                        info!("Applying transition.");
+                        {
+                            controller.send(Command::SetTransition(transition));
+                        }
+                    }
+                    _ => {
+                        return default_error_response(
+                            StatusCode::BAD_REQUEST,
+                            host,
+                            Some("Has to have a query key `action`"),
+                        )
+                        .await
                     }
                 }
-                Some("preview") => {
-                    info!("Applying transition.");
-                    {
-                        controller
-                            .lock()
-                            .unwrap()
-                            .send(Command::SetTransition(transition));
-                    }
-                }
-                _ => {
-                    return default_error_response(
-                        StatusCode::BAD_REQUEST,
-                        host,
-                        Some("Has to have a query key `action`"),
-                    )
-                    .await
-                }
+
+                r200()
             }
-
-            r200()
-        }),
+        ),
     );
 
     let local_state = state();
     extensions.add_prepare_single(
-        "/get-state".to_string(),
-        prepare!(_request, _host, _path, _addr, move |local_state| {
+        "/get-state",
+        prepare!(_request, _host, _path, _addr, move |local_state: Arc<
+            Mutex<SharedState>,
+        >| {
             let state = datas::StateData::from_shared_state(&*local_state.lock().unwrap());
             let mut body = utils::WriteableBytes::with_capacity(1024);
             serde_json::to_writer(&mut body, &state).expect("failed to parse shared state");
@@ -370,51 +389,59 @@ fn create_server<T: VariableOut + Send>(
     let controller = ctl();
     let save = saved();
     extensions.add_prepare_single(
-        "/add-scheduler".to_string(),
-        prepare!(request, host, _path, _addr, move |save, controller| {
-            let body = match read_body(request).await {
-                Ok(b) => b,
-                Err(_) => {
-                    return default_error_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        host,
-                        Some("Failed to read request body"),
-                    )
-                    .await
-                }
-            };
-
-            let data = serde_json::from_slice(&body).ok();
-            let command = data.and_then(|data: datas::AddSchedulerData| {
-                let data_clone = data.clone();
-                data.into_command(false).map(|cmd| (data_clone, cmd))
-            });
-
-            match command {
-                Some((data, cmd)) => {
-                    {
-                        controller.lock().unwrap().send(cmd);
+        "/add-scheduler",
+        prepare!(
+            request,
+            host,
+            _path,
+            _addr,
+            move |save: Arc<Mutex<save_state::DataWrapper>>, controller: ControllerSender| {
+                let body = match read_body(request).await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        return default_error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            host,
+                            Some("Failed to read request body"),
+                        )
+                        .await
                     }
-                    save.lock().unwrap().get_mut().mut_schedulers().push(data);
-                }
-                None => {
-                    return default_error_response(
-                        StatusCode::BAD_REQUEST,
-                        host,
-                        Some("Failed to serialize body"),
-                    )
-                    .await
-                }
-            }
+                };
 
-            r200()
-        }),
+                let data = serde_json::from_slice(&body).ok();
+                let command = data.and_then(|data: datas::AddSchedulerData| {
+                    let data_clone = data.clone();
+                    data.into_command(false).map(|cmd| (data_clone, cmd))
+                });
+
+                match command {
+                    Some((data, cmd)) => {
+                        {
+                            controller.send(cmd);
+                        }
+                        save.lock().unwrap().get_mut().mut_schedulers().push(data);
+                    }
+                    None => {
+                        return default_error_response(
+                            StatusCode::BAD_REQUEST,
+                            host,
+                            Some("Failed to serialize body"),
+                        )
+                        .await
+                    }
+                }
+
+                r200()
+            }
+        ),
     );
 
     let local_state = state();
     extensions.add_prepare_single(
-        "/get-schedulers".to_string(),
-        prepare!(_request, _host, _path, _addr, move |local_state| {
+        "/get-schedulers",
+        prepare!(_request, _host, _path, _addr, move |local_state: Arc<
+            Mutex<SharedState>,
+        >| {
             let mut now = scheduler::LazyNow::new();
 
             let mut schedulers: Vec<(datas::SchedulerData, Option<Duration>)> = local_state
@@ -430,9 +457,7 @@ fn create_server<T: VariableOut + Send>(
                             &mut now,
                         ),
                         match scheduler.get_next(&mut now) {
-                            Next::At(dur, _) => {
-                                Some((dur - get_naive_now()).to_std().unwrap_or(Duration::ZERO))
-                            }
+                            Next::At(dur, _) => Some((dur - now.now()).unsigned_abs()),
                             Next::Unknown => None,
                         },
                     )
@@ -453,32 +478,38 @@ fn create_server<T: VariableOut + Send>(
 
     let controller = ctl();
     extensions.add_prepare_single(
-        "/remove-scheduler".to_string(),
-        prepare!(request, host, _path, _addr, move |controller| {
-            match get_query_value(request, "name") {
-                Some(s) => {
-                    {
-                        controller.lock().unwrap().send(Command::RemoveScheduler(s));
+        "/remove-scheduler",
+        prepare!(
+            request,
+            host,
+            _path,
+            _addr,
+            move |controller: ControllerSender| {
+                match get_query_value(request, "name") {
+                    Some(s) => {
+                        {
+                            controller.send(Command::RemoveScheduler(s));
+                        }
+                        // Can be removed since we check if internal schedulers disappeared.
+                        // save.lock()
+                        //     .unwrap()
+                        //     .get_mut()
+                        //     .mut_schedulers()
+                        //     .retain(|scheduler| scheduler.name != s);
                     }
-                    // Can be removed since we check if internal schedulers disappeared.
-                    // save.lock()
-                    //     .unwrap()
-                    //     .get_mut()
-                    //     .mut_schedulers()
-                    //     .retain(|scheduler| scheduler.name != s);
+                    None => {
+                        return default_error_response(
+                            StatusCode::BAD_REQUEST,
+                            host,
+                            Some("Has to have the query key `name`"),
+                        )
+                        .await
+                    }
                 }
-                None => {
-                    return default_error_response(
-                        StatusCode::BAD_REQUEST,
-                        host,
-                        Some("Has to have the query key `name`"),
-                    )
-                    .await
-                }
-            }
 
-            r200()
-        }),
+                r200()
+            }
+        ),
     );
 
     let mut localhost = Host::unsecure(
@@ -488,20 +519,19 @@ fn create_server<T: VariableOut + Send>(
         host::Options::new(),
     );
     localhost.disable_server_cache().disable_client_cache();
-    let hosts = Data::builder().default(localhost).build();
+    let hosts = HostCollection::builder().default(localhost).build();
     RunConfig::new().bind(PortDescriptor::new(8080, hosts))
 }
 
-pub fn parse_time(string: &str) -> Option<chrono::NaiveTime> {
-    chrono::NaiveTime::parse_from_str(string, "%H:%M:%S")
-        .or_else(|_| chrono::NaiveTime::parse_from_str(string, "%H:%M"))
+pub fn parse_time(string: &str) -> Option<time::Time> {
+    time::Time::parse(string, &SECOND_FORMAT)
+        .or_else(|_| time::Time::parse(string, &MINUTE_FORMAT))
         .ok()
 }
 
 /// Quite nasty code
 pub mod save_state {
     use super::*;
-    use ::chrono::Weekday;
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct WeekSchedulerData {
@@ -529,7 +559,7 @@ pub mod save_state {
         pub fn from_scheduler(scheduler: &WeekScheduler) -> Self {
             macro_rules! fmt_time {
                 ($e:expr) => {
-                    $e.map(|time| time.format("%H:%M:%S").to_string())
+                    $e.map(|time| time.format(&SECOND_FORMAT).unwrap())
                 };
             }
 
@@ -548,9 +578,7 @@ pub mod save_state {
             macro_rules! fmt_time {
                 ($e:expr) => {
                     match $e.as_ref() {
-                        Some(time) => Some(
-                            chrono::NaiveTime::parse_from_str(time.as_str(), "%H:%M:%S").ok()?,
-                        ),
+                        Some(time) => Some(time::Time::parse(time.as_str(), SECOND_FORMAT).ok()?),
                         None => None,
                     }
                 };
@@ -702,6 +730,8 @@ pub mod save_state {
 }
 
 pub mod datas {
+    use httpwm::primitive_to_tz;
+
     use super::*;
     #[derive(Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub struct DayData {
@@ -709,8 +739,8 @@ pub mod datas {
         time: Option<String>,
     }
     impl DayData {
-        pub fn parse(&self) -> Option<(Weekday, Option<NaiveTime>)> {
-            let day: ::chrono::Weekday = self.day.parse().ok()?;
+        pub fn parse(&self) -> Option<(Weekday, Option<time::Time>)> {
+            let day: Weekday = self.day.parse().ok()?;
             let time = match self.time.as_ref() {
                 Some(time) => Some(parse_time(time)?),
                 None => None,
@@ -767,14 +797,14 @@ pub mod datas {
     impl StateData {
         pub fn from_shared_state(state: &SharedState) -> Self {
             let mut days = HashMap::with_capacity(7);
-            let mut day = ::chrono::Weekday::Mon;
+            let mut day = Weekday::Mon;
             for _ in 0..7 {
                 days.insert(
                     weekday_to_lowercase_str(&day).to_string(),
                     state
                         .ref_week_schedule()
                         .get(day)
-                        .map(|time| time.to_string()),
+                        .map(|time| time.format(&SECOND_FORMAT).unwrap()),
                 );
                 day = day.succ();
             }
@@ -805,14 +835,16 @@ pub mod datas {
 
             let scheduler: Box<dyn Scheduler> = match self.kind.as_str() {
                 "at" if self.extras.len() == 1 => {
-                    let date_time =
-                        chrono::NaiveDate::parse_from_str(self.extras[0].as_str(), "%Y-%m-%d")
-                            .ok()?
-                            .and_time(time);
-                    if has_occurred(date_time) && !allow_past {
+                    let date_time = time::Date::parse(self.extras[0].as_str(), &DATE_FORMAT)
+                        .ok()?
+                        .with_time(time);
+                    if has_occurred(primitive_to_tz(date_time)) && !allow_past {
                         return None;
                     }
-                    Box::new(extra_schedulers::At::new(common, date_time))
+                    Box::new(extra_schedulers::At::new(
+                        common,
+                        primitive_to_tz(date_time),
+                    ))
                 }
                 "every-week" if self.extras.len() == 1 => Box::new(
                     extra_schedulers::EveryWeek::new(common, time, self.extras[0].parse().ok()?),
@@ -840,26 +872,19 @@ pub mod datas {
 
             let next_occurrence = match dur {
                 Next::At(date_time, _) => {
-                    let dur = date_time - get_naive_now();
-                    if dur.num_days() > 0 {
-                        (get_naive_now() + dur)
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string()
-                    } else if dur.num_hours() > 0 {
-                        format!("In {} hours", dur.num_hours())
-                    } else if dur.num_minutes() > 0 {
-                        format!("In {} minutes", dur.num_minutes())
+                    let dur = date_time - now.now();
+                    if dur.whole_days() > 0 {
+                        (now.now() + dur).format(&DATE_TIME_FORMAT).unwrap()
+                    } else if dur.whole_hours() > 0 {
+                        format!("In {} hours", dur.whole_hours())
+                    } else if dur.whole_minutes() > 0 {
+                        format!("In {} minutes", dur.whole_minutes())
                     } else {
-                        format!("In {} seconds", dur.num_seconds())
+                        format!("In {} seconds", dur.whole_seconds())
                     }
                 }
                 Next::Unknown => "unknown".to_string(),
             };
-
-            // let next_occurrence = (chrono::Local::now()
-            //     + chrono::Duration::from_std(scheduler.get_next().0)
-            //         .expect("std duration overflowed!"))
-            // .to_rfc3339();
 
             Self {
                 name,
@@ -871,15 +896,16 @@ pub mod datas {
     }
 }
 pub mod extra_schedulers {
-    use ::chrono::Datelike;
     use httpwm::scheduler::Keep;
 
     use super::*;
+    use httpwm::primitive_to_tz;
+    use time::OffsetDateTime;
 
-    pub(crate) fn get_next_day<F: Fn(::chrono::Weekday) -> Option<chrono::NaiveTime>>(
-        from: ::chrono::Weekday,
+    pub(crate) fn get_next_day<F: Fn(Weekday) -> Option<time::Time>>(
+        from: Weekday,
         get: F,
-    ) -> Option<(chrono::NaiveTime, u8)> {
+    ) -> Option<(time::Time, u8)> {
         let mut day = from;
 
         for passed in 0..7 {
@@ -914,10 +940,10 @@ pub mod extra_schedulers {
     #[derive(Debug)]
     pub struct At {
         common: Common,
-        moment: chrono::NaiveDateTime,
+        moment: OffsetDateTime,
     }
     impl At {
-        pub fn new(common: Common, moment: chrono::NaiveDateTime) -> Self {
+        pub fn new(common: Common, moment: OffsetDateTime) -> Self {
             Self { common, moment }
         }
     }
@@ -938,26 +964,26 @@ pub mod extra_schedulers {
     #[derive(Debug)]
     pub struct EveryWeek {
         common: Common,
-        time: ::chrono::NaiveTime,
-        day: ::chrono::Weekday,
+        time: time::Time,
+        day: Weekday,
     }
     impl EveryWeek {
-        pub fn new(common: Common, time: chrono::NaiveTime, day: ::chrono::Weekday) -> Self {
+        pub fn new(common: Common, time: time::Time, day: Weekday) -> Self {
             Self { common, time, day }
         }
     }
     impl Scheduler for EveryWeek {
         fn get_next(&self, now: &mut scheduler::LazyNow) -> Next {
             let now = now.now();
-            if self.day == now.weekday() && now.time() < self.time {
+            if self.day == Weekday::from(now.weekday()) && now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 Next::At(
-                    ::chrono::Local::today().naive_utc().and_time(self.time),
+                    now.replace_time(self.time),
                     self.common.get_command().into_inner(),
                 )
             } else {
                 // Unwrap is ok, we must have one day containing a date.
-                let (time, offset) = get_next_day(now.weekday(), |day| {
+                let (time, offset): (time::Time, _) = get_next_day(now.weekday().into(), |day| {
                     if day == self.day {
                         Some(self.time)
                     } else {
@@ -966,7 +992,9 @@ pub mod extra_schedulers {
                 })
                 .unwrap();
                 Next::At(
-                    now.date().and_time(time) + chrono::Duration::days(offset as i64),
+                    primitive_to_tz(
+                        now.date().with_time(time) + time::Duration::days(offset as i64),
+                    ),
                     self.common.get_command().into_inner(),
                 )
             }
@@ -984,10 +1012,10 @@ pub mod extra_schedulers {
     #[derive(Debug)]
     pub struct EveryDay {
         common: Common,
-        time: chrono::NaiveTime,
+        time: time::Time,
     }
     impl EveryDay {
-        pub fn new(common: Common, time: chrono::NaiveTime) -> Self {
+        pub fn new(common: Common, time: time::Time) -> Self {
             Self { common, time }
         }
     }
@@ -997,14 +1025,13 @@ pub mod extra_schedulers {
             if now.time() < self.time {
                 // Unwrap is OK, now will never be over self.time.
                 Next::At(
-                    ::chrono::Local::today().naive_utc().and_time(self.time),
+                    now.replace_time(self.time),
                     self.common.get_command().into_inner(),
                 )
             } else {
                 // Unwrap is OK, it's one day ahead!
                 Next::At(
-                    ::chrono::Local::today().naive_utc().and_time(self.time)
-                        + chrono::Duration::days(1),
+                    now.replace_time(self.time) + time::Duration::days(1),
                     self.common.get_command().into_inner(),
                 )
             }

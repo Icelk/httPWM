@@ -1,14 +1,95 @@
 pub mod scheduler;
 
-use chrono::prelude::*;
 use rppal::{gpio::OutputPin, pwm::Pwm};
 pub use scheduler::{Next, Scheduler, WeekScheduler};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 use std::{
     sync::{mpsc, Arc, Mutex},
     thread,
 };
+use time::OffsetDateTime;
+use time_tz::{OffsetDateTimeExt, PrimitiveDateTimeExt};
+
+lazy_static::lazy_static! {
+    static ref TIMEZONE: Option<&'static time_tz::Tz> = time_tz::system::get_timezone().ok();
+}
+
+pub fn get_timezone() -> Option<&'static time_tz::Tz> {
+    *TIMEZONE
+}
+pub fn primitive_to_tz(datetime: time::PrimitiveDateTime) -> time::OffsetDateTime {
+    let v = if let Some(tz) = get_timezone() {
+        datetime.assume_timezone(tz).take_first()
+    } else {
+        None
+    };
+    v.unwrap_or_else(|| datetime.assume_utc())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Weekday {
+    Mon,
+    Tue,
+    Wed,
+    Thu,
+    Fri,
+    Sat,
+    Sun,
+}
+impl Weekday {
+    pub fn pred(self) -> Self {
+        match self {
+            Weekday::Mon => Self::Sun,
+            Weekday::Tue => Self::Mon,
+            Weekday::Wed => Self::Tue,
+            Weekday::Thu => Self::Wed,
+            Weekday::Fri => Self::Thu,
+            Weekday::Sat => Self::Fri,
+            Weekday::Sun => Self::Sat,
+        }
+    }
+    pub fn succ(self) -> Self {
+        match self {
+            Weekday::Mon => Self::Tue,
+            Weekday::Tue => Self::Wed,
+            Weekday::Wed => Self::Thu,
+            Weekday::Thu => Self::Fri,
+            Weekday::Fri => Self::Sat,
+            Weekday::Sat => Self::Sun,
+            Weekday::Sun => Self::Mon,
+        }
+    }
+}
+impl FromStr for Weekday {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "mon" => Self::Mon,
+            "tue" => Self::Tue,
+            "wed" => Self::Wed,
+            "thu" => Self::Thu,
+            "fri" => Self::Fri,
+            "sat" => Self::Sat,
+            "sun" => Self::Sun,
+            _ => return Err(()),
+        })
+    }
+}
+impl From<time::Weekday> for Weekday {
+    fn from(w: time::Weekday) -> Self {
+        match w {
+            time::Weekday::Monday => Self::Mon,
+            time::Weekday::Tuesday => Self::Tue,
+            time::Weekday::Wednesday => Self::Wed,
+            time::Weekday::Thursday => Self::Thu,
+            time::Weekday::Friday => Self::Fri,
+            time::Weekday::Saturday => Self::Sat,
+            time::Weekday::Sunday => Self::Sun,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
 pub struct Strength(f64);
@@ -99,7 +180,7 @@ impl Default for Transition {
 pub enum Command {
     Set(Strength),
     SetTransition(Transition),
-    ChangeDayTimer(Weekday, Option<NaiveTime>),
+    ChangeDayTimer(Weekday, Option<time::Time>),
     ChangeDayTimerTransition(Transition),
     AddReplaceScheduler(String, Box<dyn Scheduler>),
     RemoveScheduler(String),
@@ -230,9 +311,9 @@ impl VariableOut for PrintOut {
     }
 }
 
-pub fn get_naive_now() -> chrono::NaiveDateTime {
-    let now = chrono::Local::now();
-    now.date().naive_utc().and_time(now.time())
+pub fn get_now() -> time::OffsetDateTime {
+    let time = time::OffsetDateTime::now_utc();
+    get_timezone().map_or(time, |offset| time.to_timezone(offset))
 }
 
 #[derive(Debug)]
@@ -296,16 +377,34 @@ pub fn weekday_to_lowercase_str(weekday: &Weekday) -> &'static str {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum Sleeping {
-    To(NaiveDateTime),
+    To(OffsetDateTime),
     Wake,
     Forever,
 }
 
-pub fn has_occurred(date_time: NaiveDateTime) -> bool {
-    let now = get_naive_now();
-    (date_time - now) < chrono::Duration::zero()
+pub fn has_occurred(date_time: OffsetDateTime) -> bool {
+    let now = get_now();
+    (date_time - now) < time::Duration::ZERO
 }
 
+/// Subset of [`Controller`] which can send.
+#[derive(Debug)]
+pub struct ControllerSender {
+    channel: mpsc::SyncSender<Command>,
+}
+impl ControllerSender {
+    pub fn send(&self, command: Command) {
+        match &command {
+            Command::Set(_) => {
+                let _ = self.channel.try_send(command);
+            }
+            _ => self
+                .channel
+                .send(command)
+                .expect("failed to send message on channel"),
+        }
+    }
+}
 /// The handler's job is to handle [`Scheduler`]s and transitions.
 ///
 /// This is done by spawning a thread and running all code on it.
@@ -384,6 +483,12 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
             channel: sender,
             handle,
             shared_state,
+        }
+    }
+
+    pub fn to_sender(&self) -> ControllerSender {
+        ControllerSender {
+            channel: self.channel.clone(),
         }
     }
 

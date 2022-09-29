@@ -1,11 +1,12 @@
 use std::fmt::Debug;
 
 use crate::{
-    get_naive_now, has_occurred, Action, Command, Duration, Instant, SharedState, Strength,
-    Transition, TransitionInterpolation,
+    get_now, has_occurred, primitive_to_tz, Action, Command, Duration, Instant, SharedState,
+    Strength, Transition, TransitionInterpolation, Weekday,
 };
-use chrono::prelude::*;
+use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
+use time::{OffsetDateTime, Time};
 
 pub enum Progress {
     Pending(Duration),
@@ -17,27 +18,26 @@ pub enum Keep {
     Remove,
 }
 pub enum Next {
-    At(NaiveDateTime, Command),
+    At(OffsetDateTime, Command),
     Unknown,
 }
 /// Now, represented as a [`chrono::NaiveDateTime`], being lazily evaluated.
 /// Should not be used long after it's initiation, since `now` stays the same after the first call to [`LazyNow::now()`].
 pub struct LazyNow {
-    now: Option<NaiveDateTime>,
+    now: Option<OffsetDateTime>,
 }
 impl LazyNow {
     pub fn new() -> Self {
         Self { now: None }
     }
-    pub fn now(&mut self) -> NaiveDateTime {
+    pub fn now(&mut self) -> OffsetDateTime {
         match self.now {
             Some(now) => now,
             None => {
-                self.now = Some(get_naive_now());
+                self.now = Some(get_now());
                 match self.now {
                     Some(now) => now,
-                    // SAFETY: the code above just filled the option
-                    None => unsafe { core::hint::unreachable_unchecked() },
+                    None => panic!("we just replaced the value with Some"),
                 }
             }
         }
@@ -66,21 +66,21 @@ pub trait Scheduler: Debug + Send + Sync {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct WeekScheduler {
-    pub mon: Option<NaiveTime>,
-    pub tue: Option<NaiveTime>,
-    pub wed: Option<NaiveTime>,
-    pub thu: Option<NaiveTime>,
-    pub fri: Option<NaiveTime>,
-    pub sat: Option<NaiveTime>,
-    pub sun: Option<NaiveTime>,
+    pub mon: Option<Time>,
+    pub tue: Option<Time>,
+    pub wed: Option<Time>,
+    pub thu: Option<Time>,
+    pub fri: Option<Time>,
+    pub sat: Option<Time>,
+    pub sun: Option<Time>,
     pub transition: Transition,
-    last: Option<NaiveDateTime>,
+    last: Option<OffsetDateTime>,
 }
 impl WeekScheduler {
     pub fn empty(transition: Transition) -> Self {
         Self::same_with_day(None, transition)
     }
-    fn same_with_day(time: Option<NaiveTime>, transition: Transition) -> Self {
+    fn same_with_day(time: Option<Time>, transition: Transition) -> Self {
         Self {
             mon: time,
             tue: time,
@@ -94,11 +94,11 @@ impl WeekScheduler {
         }
     }
 
-    pub fn same(time: NaiveTime, transition: Transition) -> Self {
+    pub fn same(time: Time, transition: Transition) -> Self {
         Self::same_with_day(Some(time), transition)
     }
 
-    pub fn get_next_from_day(&self, day: Weekday) -> Option<(&NaiveTime, u8)> {
+    pub fn get_next_from_day(&self, day: Weekday) -> Option<(&time::Time, u8)> {
         let mut day = day.pred();
         for passed in 0..7 {
             day = day.succ();
@@ -109,7 +109,7 @@ impl WeekScheduler {
         }
         None
     }
-    pub fn get(&self, day: Weekday) -> &Option<NaiveTime> {
+    pub fn get(&self, day: Weekday) -> &Option<time::Time> {
         match day {
             Weekday::Mon => &self.mon,
             Weekday::Tue => &self.tue,
@@ -120,7 +120,7 @@ impl WeekScheduler {
             Weekday::Sun => &self.sun,
         }
     }
-    pub fn get_mut(&mut self, day: Weekday) -> &mut Option<NaiveTime> {
+    pub fn get_mut(&mut self, day: Weekday) -> &mut Option<time::Time> {
         match day {
             Weekday::Mon => &mut self.mon,
             Weekday::Tue => &mut self.tue,
@@ -134,13 +134,12 @@ impl WeekScheduler {
 }
 impl Scheduler for WeekScheduler {
     fn advance(&mut self) -> Keep {
-        self.last = Some(get_naive_now());
+        self.last = Some(get_now());
         Keep::Keep
     }
     fn get_next(&self, now: &mut LazyNow) -> Next {
         let now = now.now();
-        // todo!("fix this to be naiveDateTime?");
-        let next_today = match self.get(now.weekday()) {
+        let next_today = match self.get(now.weekday().into()) {
             Some(t) => *t,
             None => return Next::Unknown,
         };
@@ -149,23 +148,26 @@ impl Scheduler for WeekScheduler {
         let next = if now.time() < next_today
             && self
                 .last
-                .map(|l| l.date() < get_naive_now().date())
+                .map(|l| l.date() < get_now().date())
                 .unwrap_or(true)
         {
-            now.date().and_time(next_today)
+            now.date().with_time(next_today)
         } else {
             // Unwrap is ok; we checked the same function above and return if it was `None`.
             // If it returns `Some` for Weekday x, it will also return `Some` for Weekday x.succ(); it's a cycle.
-            let (time, day) = self.get_next_from_day(now.weekday().succ()).unwrap();
+            let (time, day) = self
+                .get_next_from_day(Weekday::from(now.weekday()).succ())
+                .unwrap();
             // Since we get the next day from function
             let day = day + 1;
 
-            now.date().and_time(*time) + chrono::Duration::days(day as i64)
+            now.date().with_time(*time) + time::Duration::days(day as i64)
         };
         // if your transition time is larger than what std can handle, you have other problems
-        let next = next - chrono::Duration::from_std(self.transition.time).unwrap();
+        let next =
+            next - time::Duration::try_from(self.transition.time).unwrap_or(time::Duration::MAX);
         Next::At(
-            next,
+            primitive_to_tz(next),
             Command::SetTransition(Transition::clone(&self.transition)),
         )
     }
@@ -301,7 +303,7 @@ impl TransitionState {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum SleepTime {
-    To(NaiveDateTime),
+    To(OffsetDateTime),
     Forever,
 }
 
@@ -310,7 +312,7 @@ pub struct State {
     shared: Arc<Mutex<SharedState>>,
 
     finish: bool,
-    wake_up: Option<(NaiveDateTime, Command)>,
+    wake_up: Option<(OffsetDateTime, Command)>,
     transition: Option<TransitionState>,
     last_instance: Instant,
     last_scheduler: Option<String>,
