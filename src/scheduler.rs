@@ -349,7 +349,7 @@ impl State {
                     self.shared
                         .lock()
                         .unwrap()
-                        .set_strength(Strength::clone(&strength));
+                        .set_strength(strength);
                     // send back set
                     Action::Set(strength)
                 }

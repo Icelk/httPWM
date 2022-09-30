@@ -262,7 +262,6 @@ impl VariableOut for Pwm {
     fn set(&mut self, value: Strength) {
         self.set_pulse_width(Duration::from_nanos((value.0 * 1000000.0).round() as u64))
             .unwrap();
-        thread::sleep(Duration::from_millis(10));
     }
     fn enable(&mut self) {
         println!("Enabling hardware PWM.");
@@ -298,7 +297,6 @@ pub struct PrintOut;
 impl VariableOut for PrintOut {
     fn set(&mut self, value: Strength) {
         println!("Got strength {:?}", value);
-        thread::sleep(Duration::from_millis(100));
     }
     fn enable(&mut self) {
         println!("Enabling output");
@@ -396,7 +394,7 @@ impl ControllerSender {
     pub fn send(&self, command: Command) {
         match &command {
             Command::Set(_) => {
-                let _ = self.channel.try_send(command);
+                self.channel.send(command).unwrap();
             }
             _ => self
                 .channel
@@ -417,7 +415,7 @@ pub struct Controller<T: VariableOut + Send + 'static> {
 impl<T: VariableOut + Send + 'static> Controller<T> {
     pub fn new(mut output: T, scheduler: WeekScheduler) -> Self {
         // make channel
-        let (sender, receiver) = mpsc::sync_channel(2);
+        let (sender, receiver) = mpsc::sync_channel(128);
 
         let shared_state = Arc::new(Mutex::new(SharedState::new(scheduler)));
 
@@ -432,24 +430,39 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
             output.prepare();
 
             loop {
-                let command = match receiver.try_recv().ok() {
+                let command = receiver.try_recv().ok();
+                #[cfg(not(feature = "test"))]
+                let transition_sleep_duration = Duration::from_millis(10);
+                #[cfg(feature = "test")]
+                let transition_sleep_duration = Duration::from_millis(100);
+                let sleep = match sleeping {
+                    Sleeping::To(date_time) => {
+                        (date_time - get_now() - time::Duration::milliseconds(2))
+                            .max(time::Duration::ZERO)
+                            .unsigned_abs()
+                    }
+                    Sleeping::Forever => Duration::MAX,
+                    // this is part of a transition
+                    Sleeping::Wake if command.is_none() => transition_sleep_duration,
+                    Sleeping::Wake => Duration::ZERO,
+                };
+
+                let rx = command.or_else(|| {
+                    if sleep.is_zero() {
+                        // we already tried to recv
+                        None
+                    } else {
+                        receiver.recv_timeout(sleep).ok()
+                    }
+                });
+                let command = match rx {
                     Some(r) => {
                         sleeping = Sleeping::Wake;
                         Some(r)
                     }
                     None => match sleeping {
-                        Sleeping::To(date_time) => match has_occurred(date_time) {
-                            false => {
-                                thread::sleep(Duration::from_millis(1));
-                                continue;
-                            }
-                            true => None,
-                        },
-                        Sleeping::Forever => {
-                            thread::sleep(Duration::from_millis(1));
-                            continue;
-                        }
                         Sleeping::Wake => None,
+                        _ => continue,
                     },
                 };
                 let action = state.process(command);
@@ -495,7 +508,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
     pub fn send(&self, command: Command) {
         match &command {
             Command::Set(_) => {
-                let _ = self.channel.try_send(command);
+                let _ = self.channel.send(command);
             }
             _ => self
                 .channel
