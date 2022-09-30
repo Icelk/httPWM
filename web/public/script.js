@@ -1,5 +1,4 @@
 !> cache dynamic
-let toSend = null;
 
 let mainStrength = document.getElementById("strength");
 
@@ -21,12 +20,52 @@ let schedulerTime = document.getElementById("schedulerTime");
 let schedulerName = document.getElementById("schedulerName");
 let schedulerDescription = document.getElementById("schedulerDescription");
 
-window.setInterval(() => {
-    if (toSend !== null) {
-        sendSet(toSend);
-        toSend = null;
+/**
+ * @type { {[name: string]: {backlog: Event[], inTimeout: boolean}} }
+ */
+let throttle_instances = {}
+
+/**
+ * Throttles calling `callback` to every `interval` milliseconds.
+ * If this is called more than once in the hang period, only the latest callback is called.
+ *
+ * If it's called once, which calls the callback, and then once again, it waits `interval` before
+ * calling `callback` again.
+ *
+ * @param {string} name
+ * @param {number} interval
+ * @param {() => Promise<void>} callback
+ */
+async function throttle(name, interval, callback) {
+    if (throttle_instances[name] === undefined) {
+        throttle_instances[name] = {
+            backlog: [],
+            inTimeout: false,
+        }
     }
-}, 25);
+
+    let instance = throttle_instances[name]
+
+    if (instance.inTimeout) {
+        instance.backlog.push(callback)
+        return
+    }
+
+    let now = performance.now();
+    await callback()
+    console.log(performance.now()-now)
+
+    instance.inTimeout = true
+    setTimeout(async () => {
+        instance.inTimeout = false
+        let item = instance.backlog.pop()
+
+        if (item !== undefined) {
+            instance.backlog.length = 0
+            await item()
+        }
+    }, interval)
+}
 
 window.addEventListener("unhandledrejection", (message) => {
     if (message.reason.message === "Failed to fetch") {
