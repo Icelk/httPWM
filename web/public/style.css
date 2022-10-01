@@ -59,6 +59,11 @@ code {
 body{
     color: var(--txt-col);
     background-color: var(--bg-col);
+    max-width: 110ch;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1em;
+    padding-right: 1em;
 }
 
 table {

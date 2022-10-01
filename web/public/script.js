@@ -339,7 +339,7 @@ async function load() {
             if (loadedData !== null && loadedData[target] === "expanded") {
                 // so the UI has time to draw, so we can get scrollHeight
                 toggled.style.maxHeight = `100vh`;
-                setTimeout(() => { toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`; }, 50);
+                setTimeout(() => { toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`; }, 0);
 
                 header.classList.add("expanded");
             } else {
@@ -351,6 +351,23 @@ async function load() {
 
     await Promise.all([state, schedulers]);
 }
+
+window.addEventListener("resize", () => {
+    let h2s = document.getElementsByTagName("h2");
+    for (const header of h2s) {
+        const target = header.getAttribute("toggle");
+        if (target !== null) {
+            const toggled = document.getElementById(target);
+            if (header.classList.contains("expanded")) {
+                // so the UI has time to draw, so we can get scrollHeight
+                toggled.style.maxHeight = `100vh`;
+                setTimeout(() => { toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`; }, 0);
+
+                header.classList.add("expanded");
+            }
+        }
+    }
+})
 
 load();
 checkTransitionExtras();
