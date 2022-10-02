@@ -30,7 +30,7 @@ fn main() {
     .expect("failed to get PWM");
 
     #[cfg(feature = "test")]
-    let pwm = PrintOut;
+    let pwm = PrintOut(test_output::spawn());
 
     let time = time::Time::from_hms(7, 00, 00).unwrap();
     let day_transition = Transition::default();
@@ -529,6 +529,160 @@ pub fn parse_time(string: &str) -> Option<time::Time> {
         .ok()
 }
 
+mod test_output {
+    use std::fmt::Write as WriteFmt;
+    use std::io::{BufRead, StdinLock, StdoutLock, Write};
+    use std::sync::mpsc;
+
+    fn read_until<R: BufRead + ?Sized>(
+        r: &mut R,
+        delim: u8,
+        buf: &mut Vec<u8>,
+    ) -> std::io::Result<usize> {
+        let mut read = 0;
+        loop {
+            let (done, used) = {
+                let available = match r.fill_buf() {
+                    Ok(n) => n,
+                    Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e),
+                };
+                match available.iter().position(|b| *b == delim) {
+                    Some(i) => {
+                        buf.extend_from_slice(&available[..=i]);
+                        (true, i + 1)
+                    }
+                    None => {
+                        buf.extend_from_slice(available);
+                        (false, available.len())
+                    }
+                }
+            };
+            r.consume(used);
+            read += used;
+            if done || used == 0 {
+                return Ok(read);
+            }
+        }
+    }
+
+    fn size() -> Option<(u16, u16)> {
+        use libc::winsize;
+        use std::os::unix::io::AsRawFd;
+
+        fn wrap_with_result(result: i32) -> std::io::Result<()> {
+            if result == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        }
+
+        // http://rosettacode.org/wiki/Terminal_control/Dimensions#Library:_BSD_libc
+        let mut size = winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+
+        let file = std::fs::File::open("/dev/tty");
+        let fd = if let Ok(file) = &file {
+            file.as_raw_fd()
+        } else {
+            // Fallback to libc::STDOUT_FILENO if /dev/tty is missing
+            libc::STDOUT_FILENO
+        };
+
+        #[allow(clippy::useless_conversion)]
+        if wrap_with_result(unsafe { libc::ioctl(fd, libc::TIOCGWINSZ.into(), &mut size) }).is_ok()
+            && size.ws_col != 0
+            && size.ws_row != 0
+        {
+            Some((size.ws_col, size.ws_row))
+        } else {
+            None
+        }
+    }
+    /// [lines, cols]
+    fn get_dimensions(i: &mut StdinLock, o: &mut StdoutLock) -> Option<[u16; 2]> {
+        // escape code, move cursor to 9999,9999, then query position ([6n), then return to start (\r)
+        o.write_all(b"\x1bs\x1b[9999;9999H\x1b[6n\x1bu").unwrap();
+        o.flush().unwrap();
+        let mut buf = Vec::with_capacity(10);
+        read_until(i, b'R', &mut buf).ok()?;
+        let s = String::from_utf8(buf).ok()?;
+        // returns `\0[<lines>;<cols>R`
+        let (lines, cols) = s.split_once(';')?;
+        let lines = lines.strip_prefix("\0[")?;
+        // let cols = cols.strip_suffix('R')?;
+        Some([lines.parse().ok()?, cols.parse().ok()?])
+    }
+    pub fn spawn() -> mpsc::SyncSender<f64> {
+        let (tx, rx) = mpsc::sync_channel(16);
+        std::thread::spawn(move || {
+            let sleep = std::time::Duration::from_millis(200);
+            let start = std::time::Instant::now();
+            let mut deadline = start + sleep;
+            let mut s = 0.;
+            let rows = 20;
+            let mut strengths = [0.; 100];
+            let mut out = String::new();
+            loop {
+                match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                {
+                    Ok(strength) => {
+                        s = strength;
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let mut o = std::io::stdout().lock();
+                        // update info
+                        let cols = if let Some((cols, _)) = size() {
+                            cols
+                        } else {
+                            break;
+                        };
+                        strengths.copy_within(1.., 0);
+                        *strengths.last_mut().unwrap() = s;
+
+                        // save cursor pos
+                        // write!(out, "\x1b[s").unwrap();
+                        for _ in 0..cols {
+                            out.push(' ');
+                        }
+                        out.push('\n');
+                        for row in (0..rows).rev() {
+                            let threshold = (row + 1) as f64 / rows as f64;
+                            for col in 0..cols {
+                                let idx = (col * strengths.len() as u16) / cols;
+                                if strengths[idx as usize] >= threshold {
+                                    // full block: █
+                                    out.push('\u{2588}')
+                                } else {
+                                    out.push(' ');
+                                }
+                            }
+                            out.push('\n');
+                        }
+                        // move up `rows` lines.
+                        write!(out, "\x1b[{}F", rows + 1).unwrap();
+
+                        // load cursor pos
+                        // write!(out, "\x1b[u").unwrap();
+
+                        o.write_all(out.as_bytes()).unwrap();
+                        o.flush().unwrap();
+                        out.clear();
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+                deadline += sleep;
+            }
+        });
+        tx
+    }
+}
 /// Quite nasty code
 pub mod save_state {
     use super::*;
