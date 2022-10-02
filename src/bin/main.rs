@@ -534,38 +534,6 @@ mod test_output {
     use std::io::{BufRead, StdinLock, StdoutLock, Write};
     use std::sync::mpsc;
 
-    fn read_until<R: BufRead + ?Sized>(
-        r: &mut R,
-        delim: u8,
-        buf: &mut Vec<u8>,
-    ) -> std::io::Result<usize> {
-        let mut read = 0;
-        loop {
-            let (done, used) = {
-                let available = match r.fill_buf() {
-                    Ok(n) => n,
-                    Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(e),
-                };
-                match available.iter().position(|b| *b == delim) {
-                    Some(i) => {
-                        buf.extend_from_slice(&available[..=i]);
-                        (true, i + 1)
-                    }
-                    None => {
-                        buf.extend_from_slice(available);
-                        (false, available.len())
-                    }
-                }
-            };
-            r.consume(used);
-            read += used;
-            if done || used == 0 {
-                return Ok(read);
-            }
-        }
-    }
-
     fn size() -> Option<(u16, u16)> {
         use libc::winsize;
         use std::os::unix::io::AsRawFd;
@@ -603,20 +571,6 @@ mod test_output {
         } else {
             None
         }
-    }
-    /// [lines, cols]
-    fn get_dimensions(i: &mut StdinLock, o: &mut StdoutLock) -> Option<[u16; 2]> {
-        // escape code, move cursor to 9999,9999, then query position ([6n), then return to start (\r)
-        o.write_all(b"\x1bs\x1b[9999;9999H\x1b[6n\x1bu").unwrap();
-        o.flush().unwrap();
-        let mut buf = Vec::with_capacity(10);
-        read_until(i, b'R', &mut buf).ok()?;
-        let s = String::from_utf8(buf).ok()?;
-        // returns `\0[<lines>;<cols>R`
-        let (lines, cols) = s.split_once(';')?;
-        let lines = lines.strip_prefix("\0[")?;
-        // let cols = cols.strip_suffix('R')?;
-        Some([lines.parse().ok()?, cols.parse().ok()?])
     }
     pub fn spawn() -> mpsc::SyncSender<f64> {
         let (tx, rx) = mpsc::sync_channel(16);
