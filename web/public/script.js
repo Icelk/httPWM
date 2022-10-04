@@ -30,6 +30,7 @@ let effectAdd = document.getElementById("effect-remote-add")
 let effectRemoteName = document.getElementById("effect-remote-name")
 let effectUrl = document.getElementById("effect-remote-url")
 let effectSubmit = document.getElementById("effect-submit")
+let effectReset = document.getElementById("effect-reset")
 
 /**
  * @type { {[name: string]: {backlog: Event[], inTimeout: boolean}} }
@@ -527,14 +528,31 @@ effectSpeed.addEventListener("change", () => {
         effectRadar.style.animationDuration = `${v}s`
     }
 })
-effectAdd.addEventListener("click", () => {
+const addEffect = () => {
     if (effectRemoteName.value && effectUrl.value) {
-        effectRemotes[effectRemoteName.value] = effectUrl.value
-        updateEffectPreview()
+        let url
+        try {
+            url = new URL(effectUrl.value).origin
+        } catch (_e) {
+            url = null
+        }
+        if (url !== null) {
+            effectRemotes[effectRemoteName.value] = effectUrl.value
+            updateEffectPreview()
+        } else {
+            sendNotification(`Effect URL '${effectUrl.value}' is an invalid URL`, notificationError)
+        }
     } else if (effectRemoteName.value) {
         delete effectRemotes[effectRemoteName.value]
         updateEffectPreview()
     }
+}
+effectAdd.addEventListener("click", () => addEffect())
+effectRemoteName.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addEffect()
+})
+effectUrl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") addEffect()
 })
 effectSubmit.addEventListener("click", () => {
     let centerPos = [+effectCenter.style.left.split("%")[0] / 100, +effectCenter.style.top.split("%")[0] / 100]
@@ -553,12 +571,30 @@ effectSubmit.addEventListener("click", () => {
         }
         let offset = turns * speed
 
-        remotes.push([effectRemotes[c.getAttribute("name")] ?? location.href, offset])
+        remotes.push([effectRemotes[c.getAttribute("name")] ?? location.origin, offset])
         ch = c.previousElementSibling
     }
+    let warnFailedEffect = (url) => {
+        sendNotification(`Couldn't set effect on remote light at ${url}`, notificationError)
+    }
     remotes.forEach(([url, delay]) => {
-        console.log(url, `${delay * 1000}ms`)
+        fetch(`${url}/set-effect`, { method: "PUT", body: JSON.stringify({ kind: "radar", nums: [delay, speed] }) })
+            .catch(() => warnFailedEffect(url))
+            .then((response) => {
+                if (response !== undefined && !response.ok) {
+                    warnFailedEffect(url)
+                }
+            })
     })
+    updateEffectPreview()
+})
+effectReset.addEventListener("click", () => {
+    for (const remote in effectRemotes) {
+        const url = effectRemotes[remote]
+        fetch(`${url}/set-strength?strength=0`)
+    }
+    fetch("/set-strength?strength=0")
+    mainStrength.value = 0
 })
 
 load()

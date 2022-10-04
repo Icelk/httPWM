@@ -205,7 +205,12 @@
         <h2 toggle="effects">Effects</h2>
         <div id="effects">
             <span class="collapsible-child">
-                <i>Tmp...</i>
+                <i
+                    >Effects coordinate several httPWM lights to create patterns. Add other lights by your name and
+                    their URLs (e.g. <code>http://10.0.0.3:8080</code>) Use the preview to move the lights in the
+                    virtual space to where they are in reality. You can then move the "radar center" and adjust the
+                    speed. To remove a remote, type it's name without an URL and press "Add new control".</i
+                >
                 <br />
                 <input type="text" id="effect-remote-name" placeholder="Light name" />
                 <input type="text" id="effect-remote-url" placeholder="Light control URL" />
@@ -216,8 +221,16 @@
                     <option value="radar" default>Sweeping radar</option>
                 </select>
                 <button id="effect-submit">Apply effect</button>
+                <br />
+                <button id="effect-reset">Turn off all lights</button>
                 <div id="effect-preview" class="effect-preview">
-                    <svg id="effect-radar" class="rotating" version="1.1" viewBox="0 0 85 85" xmlns="http://www.w3.org/2000/svg">
+                    <svg
+                        id="effect-radar"
+                        class="rotating"
+                        version="1.1"
+                        viewBox="0 0 85 85"
+                        xmlns="http://www.w3.org/2000/svg"
+                    >
                         <defs>
                             <clipPath id="element_2">
                                 <rect width="85" height="85" />
@@ -248,8 +261,8 @@
                         </g>
                     </svg>
 
-                    <span id="effect-center"></span>
-                    <span id="effect-self"></span>
+                    <span id="effect-center" title="Effect center"></span>
+                    <span id="effect-self" title="This light"></span>
                 </div>
                 <span class="table-round center m-top">
                     <table>

@@ -196,7 +196,16 @@ fn create_server<T: VariableOut + Send>(
     extensions.with_cors(
         Cors::empty()
             .add("/get-state", CorsAllowList::default().allow_all_origins())
-            .add("/set-effect", CorsAllowList::default().allow_all_origins())
+            .add(
+                "/set-strength",
+                CorsAllowList::default().allow_all_origins(),
+            )
+            .add(
+                "/set-effect",
+                CorsAllowList::default()
+                    .allow_all_origins()
+                    .allow_all_methods(),
+            )
             .arc(),
     );
 
@@ -516,6 +525,48 @@ fn create_server<T: VariableOut + Send>(
                             StatusCode::BAD_REQUEST,
                             host,
                             Some("Has to have the query key `name`"),
+                        )
+                        .await
+                    }
+                }
+
+                r200()
+            }
+        ),
+    );
+    let controller = ctl();
+    extensions.add_prepare_single(
+        "/set-effect",
+        prepare!(
+            request,
+            host,
+            _path,
+            _addr,
+            move |controller: ControllerSender| {
+                let body = match read_body(request).await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        return default_error_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            host,
+                            Some("Failed to read request body"),
+                        )
+                        .await
+                    }
+                };
+
+                let data: Option<datas::EffectData> = serde_json::from_slice(&body).ok();
+                let command = data.and_then(datas::EffectData::into_command);
+
+                match command {
+                    Some(cmd) => {
+                        controller.send(cmd);
+                    }
+                    None => {
+                        return default_error_response(
+                            StatusCode::BAD_REQUEST,
+                            host,
+                            Some("Failed to serialize body"),
                         )
                         .await
                     }
@@ -1014,6 +1065,24 @@ pub mod datas {
                 description: scheduler.description().to_string(),
                 kind: scheduler.kind().to_string(),
                 next_occurrence,
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize, Serialize, Clone)]
+    pub struct EffectData {
+        pub kind: String,
+        pub nums: Vec<f64>,
+    }
+    impl EffectData {
+        pub fn into_command(self) -> Option<Command> {
+            match self.kind.as_str() {
+                "radar" => {
+                    let offset = *self.nums.first()?;
+                    let speed = *self.nums.get(1)?;
+                    Some(Command::SetEffect(Effect::Radar { offset, speed }))
+                }
+                _ => None,
             }
         }
     }

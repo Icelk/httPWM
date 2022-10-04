@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
 use crate::{
-    get_now, has_occurred, primitive_to_tz, Action, Command, Duration, Instant, SharedState,
-    Strength, Transition, TransitionInterpolation, Weekday,
+    get_now, has_occurred, primitive_to_tz, Action, Command, Duration, Effect, Instant,
+    SharedState, Strength, Transition, TransitionInterpolation, Weekday,
 };
 use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
@@ -316,6 +316,7 @@ pub struct State {
     transition: Option<TransitionState>,
     last_instance: Instant,
     last_scheduler: Option<String>,
+    effect: Option<Effect>,
 }
 impl State {
     pub fn new(state: Arc<Mutex<SharedState>>) -> Self {
@@ -324,6 +325,7 @@ impl State {
             finish: false,
             wake_up: None,
             transition: None,
+            effect: None,
             last_instance: Instant::now(),
             last_scheduler: None,
         }
@@ -346,10 +348,8 @@ impl State {
                 Command::Set(strength) => {
                     // clear animation
                     self.transition = None;
-                    self.shared
-                        .lock()
-                        .unwrap()
-                        .set_strength(strength);
+                    self.effect = None;
+                    self.shared.lock().unwrap().set_strength(strength);
                     // send back set
                     Action::Set(strength)
                 }
@@ -393,6 +393,10 @@ impl State {
                     self.transition = Some(TransitionState::new(transition));
                     self.last_instance = Instant::now();
                     // unwrap() is ok; we've just set transition to be `Some`
+                    Action::Set(self.get_transition_output().unwrap())
+                }
+                Command::SetEffect(e) => {
+                    self.effect = Some(e);
                     Action::Set(self.get_transition_output().unwrap())
                 }
             },
@@ -443,7 +447,7 @@ impl State {
             let delta_time = self.get_delta_time();
             // unwrap() is ok, since transition.is_some()
             let transition = self.transition.as_mut().unwrap();
-            match transition.process(&delta_time) {
+            return match transition.process(&delta_time) {
                 TransitionStateOut::Finished(s) => {
                     self.shared
                         .lock()
@@ -453,10 +457,21 @@ impl State {
                     Some(s)
                 }
                 TransitionStateOut::Ongoing(s) => Some(s),
-            }
-        } else {
-            None
+            };
         }
+        if let Some(effect) = &self.effect {
+            let now = (get_now() - OffsetDateTime::UNIX_EPOCH).as_seconds_f64();
+            let s = match effect {
+                Effect::Radar { offset, speed } => {
+                    // - offset because we are taking 1-↓, offset should always make a remote
+                    // act in the future
+                    let v = 1. - (((now - offset) / speed) % 1.);
+                    v * v * v
+                }
+            };
+            return Some(Strength(s));
+        }
+        None
     }
     fn queue_sleep(&mut self) -> SleepTime {
         self.last_scheduler = None;
@@ -507,7 +522,6 @@ impl State {
     fn get_next(&mut self) -> Action {
         match self.get_transition_output() {
             Some(s) => Action::Set(s),
-            // get_sleep
             None => match self.finish {
                 true => Action::Break,
                 false => Action::Wait(self.queue_sleep()),

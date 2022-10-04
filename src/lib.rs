@@ -179,6 +179,11 @@ impl Default for Transition {
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub enum Effect {
+    Radar { offset: f64, speed: f64 },
+}
+
 #[derive(Debug)]
 pub enum Command {
     Set(Strength),
@@ -188,6 +193,7 @@ pub enum Command {
     AddReplaceScheduler(String, Box<dyn Scheduler>),
     RemoveScheduler(String),
     ClearAllSchedulers,
+    SetEffect(Effect),
     Finish,
 }
 impl Command {
@@ -199,6 +205,7 @@ impl Command {
             | Self::ChangeDayTimerTransition(_)
             | Self::RemoveScheduler(_)
             | Self::ClearAllSchedulers
+            | Self::SetEffect(_)
             | Self::Finish => true,
             Self::AddReplaceScheduler(_, _) => false,
         }
@@ -230,6 +237,7 @@ impl Clone for ClonableCommand {
             }
             Command::RemoveScheduler(s) => Command::RemoveScheduler(String::clone(s)),
             Command::ClearAllSchedulers => Command::ClearAllSchedulers,
+            Command::SetEffect(e) => Command::SetEffect(e.clone()),
             Command::Finish => Command::Finish,
 
             Command::AddReplaceScheduler(_, _) => {
