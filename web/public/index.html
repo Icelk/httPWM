@@ -1,4 +1,3 @@
-!> cache dynamic
 <!DOCTYPE html>
 <html lang="en">
     <head>
@@ -203,6 +202,68 @@
                 </span>
             </span>
         </div>
-        <br />
+        <h2 toggle="effects">Effects</h2>
+        <div id="effects">
+            <span class="collapsible-child">
+                <i>Tmp...</i>
+                <br />
+                <input type="text" id="effect-remote-name" placeholder="Light name" />
+                <input type="text" id="effect-remote-url" placeholder="Light control URL" />
+                <button id="effect-remote-add">Add new control</button>
+                <br />
+                <input id="effect-speed" type="number" step="0.2" min="0.2" placeholder="Effect speed (seconds)" />
+                <select name="Effect type" id="effectType" onchange="updateEffectPreview()">
+                    <option value="radar" default>Sweeping radar</option>
+                </select>
+                <button id="effect-submit">Apply effect</button>
+                <div id="effect-preview" class="effect-preview">
+                    <svg id="effect-radar" class="rotating" version="1.1" viewBox="0 0 85 85" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <clipPath id="element_2">
+                                <rect width="85" height="85" />
+                            </clipPath>
+                            <radialGradient
+                                id="element_9"
+                                cx="-41"
+                                cy="18"
+                                r="185.87"
+                                gradientTransform="matrix(.99897 .045384 -.043813 .9644 .74639 2.5015)"
+                                gradientUnits="userSpaceOnUse"
+                            >
+                                <stop stop-color="#00d531" stop-opacity="0" offset=".2193" />
+                                <stop stop-color="#00ff98" stop-opacity=".57509" offset=".35651" />
+                                <stop stop-color="#00cc83" offset=".43535" />
+                            </radialGradient>
+                        </defs>
+                        <g clip-path="url(#element_2)">
+                            <g transform="matrix(.98235 0 0 .98235 .62538 -.68791)" display="block">
+                                <g transform="translate(42.5 23.5)" stroke-width=".99964">
+                                    <path
+                                        d="m-42.5-23.5h85v85h-85v-85zm0 85h85v-85h-85v85zm42.5-41.5h-40c0-21.943 18.057-40 40-40s40 18.057 40 40h-40z"
+                                        fill="url(#element_9)"
+                                        style="mix-blend-mode: overlay"
+                                    />
+                                </g>
+                            </g>
+                        </g>
+                    </svg>
+
+                    <span id="effect-center"></span>
+                    <span id="effect-self"></span>
+                </div>
+                <span class="table-round center m-top">
+                    <table>
+                        <tbody id="effect-remotes">
+                            <tr>
+                                <td>This light</td>
+                                <td id="effectOurLocation">...</td>
+                                <td>Online</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </span>
+            </span>
+        </div>
+        <div style="height: 20em"></div>
     </body>
 </html>

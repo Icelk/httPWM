@@ -1,4 +1,3 @@
-!> cache dynamic
 :root {
     --txt-col: #cfcfcf;
     --txt-second: #9f9f9f;
@@ -8,14 +7,16 @@
     --error: #8c1c2e;
 }
 
-input, button, select {
+input,
+button,
+select {
     background-color: var(--bg-second);
     border: solid var(--txt-col);
-    
+
     --border-width: 1px;
-    
+
     border-radius: 3px;
-    
+
     border-width: 0 var(--border-width) var(--border-width) 0;
     color: inherit;
     margin: 0.25em;
@@ -29,8 +30,9 @@ input, button, select {
 input:focus {
     outline: none;
 }
-::placeholder {
-    color: var(--txt-second);
+input::placeholder {
+    color: white;
+    opacity: 0.7;
 }
 
 i {
@@ -41,7 +43,7 @@ i {
 
 h2 {
     width: max-content;
-    
+
     border-bottom: var(--bg-second) 2px solid;
     padding: 0.1em 0.5em;
     margin-bottom: 0.25em;
@@ -56,7 +58,7 @@ code {
     font-style: normal;
 }
 
-body{
+body {
     color: var(--txt-col);
     background-color: var(--bg-col);
     max-width: 110ch;
@@ -67,10 +69,10 @@ body{
 }
 
 table {
-  border-collapse: collapse;
-  border-style: hidden;
-  letter-spacing: 1px;
-  font-size: 0.8rem;
+    border-collapse: collapse;
+    border-style: hidden;
+    letter-spacing: 1px;
+    font-size: 0.8rem;
 }
 .table-round {
     border: 2px solid var(--bg-second);
@@ -80,7 +82,8 @@ span.table-round {
     display: inline-block;
 }
 
-td, th {
+td,
+th {
     border: 1px solid var(--bg-second);
     padding: 0.75em;
 }
@@ -89,7 +92,7 @@ td {
     text-align: center;
 }
 
-.center{
+.center {
     text-align: center;
     margin-left: auto;
     margin-right: auto;
@@ -97,7 +100,8 @@ td {
 .m-top {
     margin-top: 1em;
 }
-input.fill, select.fill {
+input.fill,
+select.fill {
     width: 100%;
     height: 100%;
     padding: 0.5em;
@@ -108,7 +112,6 @@ input.fill, select.fill {
 tr.inner-padding > td {
     padding: 0;
 }
-
 
 span.notification {
     position: fixed;
@@ -124,7 +127,7 @@ span.notification {
     max-width: min(20em, 80vw);
 
     transform: translateX(calc(200% + 2em));
-    transition: transform ease-out 0.4s;    
+    transition: transform ease-out 0.4s;
 }
 
 .remove-scheduler {
@@ -161,19 +164,72 @@ span.notification {
     cursor: pointer;
 }
 .collapse-host::before {
-  content: ' ';
-  display: inline-block;
+    content: " ";
+    display: inline-block;
 
-  border-top: 5px solid transparent;
-  border-bottom: 5px solid transparent;
-  border-left: 5px solid currentColor;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 5px solid currentColor;
 
-  vertical-align: middle;
-  margin-right: 0.5em;
-  transform: translateY(-2px);
+    vertical-align: middle;
+    margin-right: 0.5em;
+    transform: translateY(-2px);
 
-  transition: transform 0.25s ease-out;
+    transition: transform 0.25s ease-out;
 }
 .collapse-host.expanded::before {
-  transform: rotate(90deg) translateX(-3px);
+    transform: rotate(90deg) translateX(-3px);
+}
+
+.effect-preview {
+    width: 60%;
+    aspect-ratio: 1/1;
+    background-color: var(--bg-col);
+    border-radius: 0.5rem;
+    margin: 1em auto;
+    position: relative;
+    overflow: hidden;
+}
+.effect-preview > span {
+    height: 0.8rem;
+    width: 0.8rem;
+    border-radius: 100%;
+    background-color: var(--bg-second);
+    position: absolute;
+    translate: -50% -50%;
+    z-index: 4;
+    cursor: pointer;
+}
+#effect-center {
+    top: 50%;
+    left: 50%;
+    background-color: white;
+}
+#effect-radar {
+    position: absolute;
+    width: 300%;
+    height: 300%;
+    translate: -50% -49.6%;
+    user-select: none;
+    /* So the rotation doesn't get offset, caused by: using `translate` to move the center to 0,0 */
+    transform-origin: 50% 49.6%;
+}
+@keyframes rotating {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+.rotating {
+    animation: rotating 5s linear infinite;
+}
+.effect-remote-color {
+    border-radius: 100%;
+    height: 1em;
+    width: 1em;
+    display: inline-block;
+    vertical-align: -0.2em;
+    margin-right: 0.4em;
 }
