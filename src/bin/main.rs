@@ -177,12 +177,26 @@ fn create_server<T: VariableOut + Send>(
 ) -> kvarn::RunConfig {
     let mut extensions = Extensions::new();
 
+    let port = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8080);
+
     extensions.with_csp(
         Csp::default()
             .add(
                 "/*",
-                CspRule::default().script_src(CspValueSet::default().unsafe_inline()),
+                CspRule::default()
+                    .script_src(CspValueSet::default().unsafe_inline())
+                    // allow connect (fetch) to anywhere
+                    .connect_src(CspValueSet::default().scheme("http:")),
             )
+            .arc(),
+    );
+    extensions.with_cors(
+        Cors::empty()
+            .add("/get-state", CorsAllowList::default().allow_all_origins())
+            .add("/set-effect", CorsAllowList::default().allow_all_origins())
             .arc(),
     );
 
@@ -520,7 +534,7 @@ fn create_server<T: VariableOut + Send>(
     );
     localhost.disable_server_cache().disable_client_cache();
     let hosts = HostCollection::builder().default(localhost).build();
-    RunConfig::new().bind(PortDescriptor::new(8080, hosts))
+    RunConfig::new().bind(PortDescriptor::new(port, hosts))
 }
 
 pub fn parse_time(string: &str) -> Option<time::Time> {
@@ -529,9 +543,10 @@ pub fn parse_time(string: &str) -> Option<time::Time> {
         .ok()
 }
 
+#[cfg(feature = "test")]
 mod test_output {
     use std::fmt::Write as WriteFmt;
-    use std::io::{BufRead, StdinLock, StdoutLock, Write};
+    use std::io::Write;
     use std::sync::mpsc;
 
     fn size() -> Option<(u16, u16)> {

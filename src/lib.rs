@@ -15,6 +15,9 @@ use time_tz::{OffsetDateTimeExt, PrimitiveDateTimeExt};
 lazy_static::lazy_static! {
     static ref TIMEZONE: Option<&'static time_tz::Tz> = time_tz::system::get_timezone().ok();
 }
+static DATE_TIME_TZ_FORMAT: &[time::format_description::FormatItem] = time::macros::format_description!(
+    "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]"
+);
 
 pub fn get_timezone() -> Option<&'static time_tz::Tz> {
     *TIMEZONE
@@ -293,10 +296,12 @@ impl VariableOut for OutputPin {
     fn prepare(&mut self) {}
 }
 
-pub struct PrintOut;
+pub struct PrintOut(pub mpsc::SyncSender<f64>);
 impl VariableOut for PrintOut {
     fn set(&mut self, value: Strength) {
-        println!("Got strength {:?}", value);
+        if self.0.send(value.0).is_err() {
+            println!("Got strength {:?}", value);
+        }
     }
     fn enable(&mut self) {
         println!("Enabling output");
@@ -473,7 +478,10 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                                 output.disable();
                                 enabled = None;
                             }
-                            println!("Sleeping to {:?}", date_time);
+                            println!(
+                                "Sleeping to {}",
+                                date_time.format(&DATE_TIME_TZ_FORMAT).unwrap()
+                            );
                             sleeping = Sleeping::To(date_time)
                         }
                         scheduler::SleepTime::Forever => sleeping = Sleeping::Forever,

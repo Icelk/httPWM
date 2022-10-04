@@ -26,10 +26,11 @@ percent-encoding = { version = "^2", optional = true }
 tokio = { version = "^1", optional = true, features = ["macros"] }
 time-tz = { version = "1.0.2", features = ["system"] }
 lazy_static = "1.4.0"
+libc = { version = "0.2.134", optional = true }
 
 [features]
 default = ["bin"]
-bin = ["web"]
+bin = ["web", "libc"]
 
 web = ["kvarn", "tokio", "json", "percent-encoding"]
 json = ["serde", "serde_json"]
