@@ -451,7 +451,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                 let sleep = match sleeping {
                     Sleeping::To(date_time) => {
                         (date_time - get_now() - time::Duration::milliseconds(2))
-                            .max(time::Duration::ZERO)
+                            .max(time::Duration::milliseconds(2))
                             .unsigned_abs()
                     }
                     Sleeping::Forever => Duration::MAX,
@@ -475,6 +475,7 @@ impl<T: VariableOut + Send + 'static> Controller<T> {
                     }
                     None => match sleeping {
                         Sleeping::Wake => None,
+                        Sleeping::To(date_time) if has_occurred(date_time) => None,
                         _ => continue,
                     },
                 };
