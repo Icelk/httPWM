@@ -1,6 +1,0 @@
-{
-    "auto-start-terminal.commands": [
-        "watchexec \"./sync.sh\" src"
-    ],
-    "auto-start-terminal.showTerminal": "hide"
-}
