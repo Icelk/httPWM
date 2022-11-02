@@ -401,7 +401,7 @@ fn create_server<T: VariableOut + Send>(
         prepare!(_request, _host, _path, _addr, move |local_state: Arc<
             Mutex<SharedState>,
         >| {
-            let state = datas::StateData::from_shared_state(&*local_state.lock().unwrap());
+            let state = datas::StateData::from_shared_state(&local_state.lock().unwrap());
             let mut body = utils::WriteableBytes::with_capacity(1024);
             serde_json::to_writer(&mut body, &state).expect("failed to parse shared state");
             let body = body.into_inner().freeze();

@@ -10,17 +10,61 @@ use std::{
     thread,
 };
 use time::OffsetDateTime;
-use time_tz::{OffsetDateTimeExt, PrimitiveDateTimeExt};
 
+#[cfg(feature = "auto-tz")]
+use time_tz::{OffsetDateTimeExt, PrimitiveDateTimeExt};
+#[cfg(feature = "auto-tz")]
 lazy_static::lazy_static! {
     static ref TIMEZONE: Option<&'static time_tz::Tz> = time_tz::system::get_timezone().ok();
 }
+
+#[cfg(not(feature = "auto-tz"))]
+mod env_timezone {
+    pub static TIMEZONE: Option<&'static str> = option_env!("TIMEZONE");
+    pub static TZ_FORMAT: &[time::format_description::FormatItem] =
+        time::macros::format_description!("[offset_hour]:[offset_minute]");
+
+    pub struct UnresolvedTz(time::OffsetDateTime);
+    impl UnresolvedTz {
+        pub fn take_first(self) -> Option<time::OffsetDateTime> {
+            Some(self.0)
+        }
+    }
+    pub trait PrimitiveOffsetExt {
+        fn assume_timezone(self, tz: time::UtcOffset) -> UnresolvedTz;
+    }
+    pub trait OffsetExt {
+        fn to_timezone(self, tz: time::UtcOffset) -> time::OffsetDateTime;
+    }
+    impl PrimitiveOffsetExt for time::PrimitiveDateTime {
+        fn assume_timezone(self, tz: time::UtcOffset) -> UnresolvedTz {
+            UnresolvedTz(self.assume_offset(tz))
+        }
+    }
+    impl OffsetExt for time::OffsetDateTime {
+        fn to_timezone(self, tz: time::UtcOffset) -> time::OffsetDateTime {
+            self.to_offset(tz)
+        }
+    }
+}
+#[cfg(not(feature = "auto-tz"))]
+pub use env_timezone::{OffsetExt, PrimitiveOffsetExt};
+
 static DATE_TIME_TZ_FORMAT: &[time::format_description::FormatItem] = time::macros::format_description!(
     "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]"
 );
 
+#[cfg(feature = "auto-tz")]
 pub fn get_timezone() -> Option<&'static time_tz::Tz> {
     *TIMEZONE
+}
+#[cfg(not(feature = "auto-tz"))]
+pub fn get_timezone() -> Option<time::UtcOffset> {
+    if let Some(tz) = env_timezone::TIMEZONE {
+        time::UtcOffset::parse(tz, &env_timezone::TZ_FORMAT).ok()
+    } else {
+        None
+    }
 }
 pub fn primitive_to_tz(datetime: time::PrimitiveDateTime) -> time::OffsetDateTime {
     let v = if let Some(tz) = get_timezone() {

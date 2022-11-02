@@ -24,14 +24,24 @@ serde = { version = "^1", optional = true, features = ["derive"] }
 serde_json = { version = "^1", optional = true }
 percent-encoding = { version = "^2", optional = true }
 tokio = { version = "^1", optional = true, features = ["macros"] }
-time-tz = { version = "1.0.2", features = ["system"] }
+time-tz = { version = "1.0.2", features = ["system"], optional = true }
 lazy_static = "1.4.0"
 libc = { version = "0.2.134", optional = true }
 
 [features]
-default = ["bin"]
-bin = ["web", "libc"]
+default = ["bin", "auto-tz"]
+bin = ["web"]
 
+# get timezone from system
+# brings in lots of dependencies and doesn't work on embedded
+# if this isn't enabled, set the `TIMEZONE` environment variable to e.g. `+02:00` to set the timezone.
+auto-tz = ["time-tz"]
 web = ["kvarn", "tokio", "json", "percent-encoding"]
 json = ["serde", "serde_json"]
-test = []
+test = ["libc"]
+
+[profile.distribution]
+inherits = "release"
+opt-level = "z"
+lto = true
+strip = true
