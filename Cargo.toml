@@ -45,8 +45,9 @@ default = ["bin", "auto-tz", "kvarn/async-networking"]
 bin = ["web"]
 
 # hardware support
-rpi = ["rppal", "env_logger"]
+rpi = ["rppal", "env_logger", "kvarn/base"]
 esp32 = ["esp-idf-sys", "esp-idf-svc", "esp-idf-hal", "embedded-svc", "embuild"]
+test = ["libc", "env_logger", "kvarn/base"]
 
 # get timezone from system
 # brings in lots of dependencies and doesn't work on embedded
@@ -54,7 +55,6 @@ esp32 = ["esp-idf-sys", "esp-idf-svc", "esp-idf-hal", "embedded-svc", "embuild"]
 auto-tz = ["time-tz"]
 web = ["kvarn", "tokio", "json", "percent-encoding"]
 json = ["serde", "serde_json"]
-test = ["libc", "env_logger"]
 
 [profile.distribution]
 inherits = "release"
