@@ -117,7 +117,7 @@ fn main() {
             pwm.enable().unwrap();
             let initial = Instant::now();
             // function for intensity
-            let f = |t: f64| (t * 10.).sin() / (4. * t + 1.);
+            let f = |t: f64| (t * 10.).sin().abs() / (4. * t + 1.);
             let end = std::f64::consts::PI / 5.;
             loop {
                 let t = initial.elapsed().as_secs_f64();
@@ -125,7 +125,7 @@ fn main() {
                     break;
                 }
                 let strength = f(t);
-                pwm.set(Strength::new(strength));
+                pwm.set(Strength::new_clamped(strength));
                 thread::sleep(Duration::from_millis(10));
             }
             pwm.set(Strength::new(0.));
@@ -142,10 +142,10 @@ fn main() {
                 Err(_) => {
                     // blink light to signal no network was found
                     blink_light();
-                    thread::sleep(Duration::from_millis(500));
+                    thread::sleep(Duration::from_millis(150));
                     blink_light();
 
-                    thread::sleep(Duration::from_secs(5));
+                    thread::sleep(Duration::from_secs(2));
                 }
             };
         }

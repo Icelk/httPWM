@@ -382,10 +382,6 @@ impl<C: HwChannel, H: HwTimer, T: std::borrow::Borrow<Timer<H>>, P: OutputPin> V
         let max_duty = self.get_max_duty();
         self.set_duty((max_duty as f64 * value.into_inner()) as u32)
             .expect("Failed to set PWM duty cycle on esp32");
-        println!(
-            "Set duty to {}/{max_duty}",
-            (max_duty as f64 * value.into_inner()) as u32
-        );
     }
     fn enable(&mut self) {
         println!("Enabling hardware PWM.");
