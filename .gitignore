@@ -1,3 +1,4 @@
 Cargo.lock
 /target
 state.ron
+.embuild

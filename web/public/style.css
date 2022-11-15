@@ -233,3 +233,8 @@ span.notification {
     vertical-align: -0.2em;
     margin-right: 0.4em;
 }
+
+.wifi-remove {
+    cursor: pointer;
+    color: red;
+}

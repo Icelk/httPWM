@@ -1,3 +1,7 @@
+#[cfg(feature = "esp32")]
+use embedded_svc::{storage::*, wifi::*};
+#[cfg(feature = "esp32")]
+use esp_idf_svc::{netif::*, nvs::*, sysloop::*, wifi::*};
 use httpwm::*;
 #[cfg(feature = "web")]
 use kvarn::prelude::*;
@@ -7,6 +11,9 @@ use std::{
     thread,
     time::Duration,
 };
+
+#[cfg(feature = "esp32")]
+type NvsStorage = Arc<Mutex<esp_idf_svc::nvs_storage::EspNvsStorage>>;
 
 const SAVE_PATH: &str = "state.ron";
 static SECOND_FORMAT: &[time::format_description::FormatItem] =
@@ -18,8 +25,28 @@ static DATE_FORMAT: &[time::format_description::FormatItem] =
 static DATE_TIME_FORMAT: &[time::format_description::FormatItem] =
     time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
 
+#[cfg(feature = "esp32")]
+static INDEX_HTML: &str = include_str!("../../web/public/index.html");
+#[cfg(feature = "esp32")]
+static SCRIPT_JS: &str = include_str!("../../web/public/script.js");
+#[cfg(feature = "esp32")]
+static STYLE_CSS: &str = include_str!("../../web/public/style.css");
+#[cfg(feature = "esp32")]
+static WIFI_NAME: &'static str = env!("WIFI_NAME");
+#[cfg(feature = "esp32")]
+static WIFI_PASSWORD: &'static str = env!("WIFI_PASSWORD");
+
 fn main() {
-    #[cfg(not(feature = "test"))]
+    #[cfg(feature = "esp32")]
+    esp_idf_sys::link_patches();
+    // Bind the log crate to the ESP Logging facilities
+    #[cfg(feature = "esp32")]
+    esp_idf_svc::log::EspLogger::initialize_default();
+
+    #[cfg(any(feature = "rpi", feature = "test"))]
+    env_logger::init();
+
+    #[cfg(feature = "rpi")]
     let pwm = rppal::pwm::Pwm::with_period(
         rppal::pwm::Channel::Pwm0,
         Duration::from_millis(1),
@@ -28,6 +55,131 @@ fn main() {
         true,
     )
     .expect("failed to get PWM");
+
+    #[cfg(feature = "esp32")]
+    let mut pwm = {
+        use esp_idf_hal::{
+            ledc::config::TimerConfig, ledc::Channel, ledc::Resolution, ledc::Timer,
+            peripherals::Peripherals, units::FromValueType,
+        };
+        let peripherals = Peripherals::take().unwrap();
+        let config = TimerConfig::default()
+            .frequency(25.kHz().into())
+            .resolution(Resolution::Bits10);
+        let timer = Timer::new(peripherals.ledc.timer0, &config).expect("esp32 timer failed");
+        Channel::new(peripherals.ledc.channel0, timer, peripherals.pins.gpio18)
+            .expect("failed to create a esp32 PWM channel")
+    };
+
+    #[cfg(feature = "esp32")]
+    let netif_stack =
+        Arc::new(EspNetifStack::new().expect("Failed to create network stack on esp32"));
+    #[cfg(feature = "esp32")]
+    let sys_loop_stack =
+        Arc::new(EspSysLoopStack::new().expect("Failed to create sys loop stack on esp32"));
+    #[cfg(feature = "esp32")]
+    let default_nvs = Arc::new(EspDefaultNvs::new().expect("Failed to create nvs on esp32"));
+    #[cfg(feature = "esp32")]
+    let storage = Arc::new(Mutex::new(
+        esp_idf_svc::nvs_storage::EspNvsStorage::new_default(default_nvs.clone(), "icelk", true)
+            .expect("Failed to initialize persistent storage"),
+    ));
+
+    #[cfg(feature = "esp32")]
+    let get_data = |path: &str| {
+        let storage = storage.lock().unwrap();
+        let mut buf = vec![0; storage.len(path).ok()?? as usize];
+        storage.get_raw(path, &mut buf).ok()?;
+        Some(buf)
+    };
+    #[cfg(feature = "esp32")]
+    let known_networks = {
+        let mut networks = if let Some(file) = get_data("networks.ron") {
+            if let Ok(networks) = ron::de::from_bytes(&file) {
+                networks
+            } else {
+                error!(
+                    "Failed to parse networks file: {}",
+                    String::from_utf8_lossy(&file)
+                );
+                HashMap::new()
+            }
+        } else {
+            HashMap::new()
+        };
+        networks.insert(WIFI_NAME.into(), WIFI_PASSWORD.into());
+        networks
+    };
+    // connect to wifi
+    #[cfg(feature = "esp32")]
+    let _wifi = {
+        let mut blink_light = || {
+            pwm.enable().unwrap();
+            let initial = Instant::now();
+            // function for intensity
+            let f = |t: f64| (t * 10.).sin() / (4. * t + 1.);
+            let end = std::f64::consts::PI / 5.;
+            loop {
+                let t = initial.elapsed().as_secs_f64();
+                if t >= end {
+                    break;
+                }
+                let strength = f(t);
+                pwm.set(Strength::new(strength));
+                thread::sleep(Duration::from_millis(10));
+            }
+            pwm.set(Strength::new(0.));
+            pwm.disable().unwrap();
+        };
+        loop {
+            match wifi(
+                netif_stack.clone(),
+                sys_loop_stack.clone(),
+                default_nvs.clone(),
+                &known_networks,
+            ) {
+                Ok(w) => break w,
+                Err(_) => {
+                    // blink light to signal no network was found
+                    blink_light();
+                    thread::sleep(Duration::from_millis(500));
+                    blink_light();
+
+                    thread::sleep(Duration::from_secs(5));
+                }
+            };
+        }
+    };
+    // sync time
+    #[cfg(feature = "esp32")]
+    let sntp = esp_idf_svc::sntp::EspSntp::new_default()
+        .expect("Failed to set up time synchronization on esp32");
+    #[cfg(feature = "esp32")]
+    loop {
+        use embedded_svc::sys_time::SystemTime;
+        if sntp.get_sync_status() != esp_idf_svc::sntp::SyncStatus::Completed {
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        }
+        info!(
+            "Time synced: {:?}",
+            std::time::SystemTime::UNIX_EPOCH + esp_idf_svc::systime::EspSystemTime.now()
+        );
+        break;
+    }
+    // try load set timezone
+    #[cfg(feature = "esp32")]
+    {
+        if let Some(data) = get_data("timezone.txt") {
+            if let Ok(s) = std::str::from_utf8(&data) {
+                if httpwm::env_timezone::try_set_timezone(s).is_err() {
+                    error!("Failed to parse saved timezone: {s:?}");
+                    let mut storage = storage.lock().unwrap();
+                    let _ = storage.remove("timezone.txt");
+                }
+            }
+        }
+    }
 
     #[cfg(feature = "test")]
     let pwm = PrintOut(test_output::spawn());
@@ -47,7 +199,24 @@ fn main() {
     let scheduler = scheduler::WeekScheduler::same(time, day_transition);
 
     let (saved_state, week_scheduler) = {
+        #[cfg(not(feature = "esp32"))]
         let saved_state = save_state::Data::read_from_file(SAVE_PATH, &scheduler);
+
+        #[cfg(feature = "esp32")]
+        let saved_state = {
+            let bytes = get_data(SAVE_PATH);
+            bytes
+                .map(|b| ron::de::from_bytes::<'_, save_state::Data>(&b).ok())
+                .flatten()
+                .map(|mut data| {
+                    if data.week_scheduler.is_none() {
+                        data.week_scheduler =
+                            Some(save_state::WeekSchedulerData::from_scheduler(&scheduler));
+                    }
+                    data
+                })
+                .ok_or(())
+        };
 
         match saved_state.ok().and_then(|state| {
             state
@@ -57,7 +226,7 @@ fn main() {
         }) {
             Some((scheduler, data)) => (data, scheduler),
             None => {
-                eprintln!("Failed to parse state file. Using defaults.");
+                error!("Failed to parse state file. Using defaults.");
                 (save_state::Data::from_week_scheduler(&scheduler), scheduler)
             }
         }
@@ -74,6 +243,8 @@ fn main() {
         let shared = Arc::clone(&shared);
         let saved = Arc::clone(&saved_state);
         let controller = Arc::clone(&controller);
+        #[cfg(feature = "esp32")]
+        let storage = Arc::clone(&storage);
         thread::spawn(move || {
             thread::sleep(Duration::from_secs_f64(
                 startup_duration * (startup_multiplier.unwrap_or(0.0) + 1.0),
@@ -114,14 +285,14 @@ fn main() {
                 }
 
                 if saved.save() || changed {
-                    println!("Saving state!");
+                    info!("Saving state!");
 
                     let data = {
                         let config = ron::ser::PrettyConfig::default()
                             .extensions(ron::extensions::Extensions::IMPLICIT_SOME);
                         match ron::ser::to_string_pretty(saved.get_ref(), config) {
                             Err(err) => {
-                                eprintln!("Failed to save state {}", err);
+                                error!("Failed to serialize state {}", err);
                                 continue;
                             }
                             Ok(s) => s,
@@ -129,15 +300,25 @@ fn main() {
                     };
                     drop(saved);
 
-                    let mut file = match std::fs::File::create(SAVE_PATH) {
-                        Err(err) => {
-                            eprintln!("Failed to create file {}", err);
-                            continue;
+                    #[cfg(not(feature = "esp32"))]
+                    {
+                        let mut file = match std::fs::File::create(SAVE_PATH) {
+                            Err(err) => {
+                                error!("Failed to create file {}", err);
+                                continue;
+                            }
+                            Ok(f) => f,
+                        };
+                        if let Err(err) = file.write_all(data.as_bytes()) {
+                            error!("Failed to write data to file {}", err);
                         }
-                        Ok(f) => f,
-                    };
-                    if let Err(err) = file.write_all(data.as_bytes()) {
-                        eprintln!("Failed to write data to file {}", err);
+                    }
+                    #[cfg(feature = "esp32")]
+                    {
+                        let mut storage = storage.lock().unwrap();
+                        if storage.put_raw(SAVE_PATH, data.as_bytes()).is_err() {
+                            error!("Failed to write to NVS.");
+                        }
                     }
                 }
             });
@@ -145,42 +326,87 @@ fn main() {
     }
 
     #[cfg(feature = "web")]
-    run(controller, saved_state, shared);
+    run(
+        controller,
+        saved_state,
+        shared,
+        #[cfg(feature = "esp32")]
+        known_networks,
+        #[cfg(feature = "esp32")]
+        storage,
+    );
 }
 
 #[cfg(feature = "web")]
 fn get_query_value<'a, T>(req: &'a Request<T>, key: &'a str) -> Option<String> {
     let query = req.uri().query().map(parse::query);
     let pair = query.as_ref().and_then(|q| q.get(key));
-    pair.map(|pair| pair.value().into())
+    pair.map(|pair| pair.value().to_owned())
 }
 
+// #[cfg(all(feature = "web", not(feature = "esp32")))]
 #[cfg(feature = "web")]
 #[tokio::main(flavor = "current_thread")]
 async fn run<T: VariableOut + Send>(
     controller: Arc<Mutex<Controller<T>>>,
     save_state: Arc<Mutex<save_state::DataWrapper>>,
     shared: Arc<Mutex<SharedState>>,
+    #[cfg(feature = "esp32")] known_networks: HashMap<String, String>,
+    #[cfg(feature = "esp32")] storage: NvsStorage,
 ) {
-    create_server(controller, save_state, shared)
-        .execute()
-        .await
-        .wait()
-        .await;
+    create_server(
+        controller,
+        save_state,
+        shared,
+        #[cfg(feature = "esp32")]
+        known_networks,
+        #[cfg(feature = "esp32")]
+        storage,
+    )
+    .execute()
+    .await
+    .wait()
+    .await;
 }
+// #[cfg(all(feature = "web", feature = "esp32"))]
+// #[tokio::main(flavor = "current_thread")]
+// async fn run<T: VariableOut + Send>(
+// controller: Arc<Mutex<Controller<T>>>,
+// save_state: Arc<Mutex<save_state::DataWrapper>>,
+// shared: Arc<Mutex<SharedState>>,
+// ) {
+// let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+// let registry = create_server(tx);
+// let _server = registry
+// .start(&esp_idf_svc::httpd::Configuration {
+// http_port: 80,
+// https_port: 0,
+// max_uri_handlers: 15,
+// })
+// .unwrap();
+
+// let host = create_host(controller, save_state, shared);
+
+// while let Some((mut req, channel)) = rx.recv().await {
+// let response = kvarn::handle_cache(
+// &mut req,
+// SocketAddr::V4(net::SocketAddrV4::new(net::Ipv4Addr::UNSPECIFIED, 0)),
+// &host,
+// )
+// .await;
+// channel.send(response.response).unwrap();
+// }
+// }
 
 #[cfg(feature = "web")]
-fn create_server<T: VariableOut + Send>(
+fn create_host<T: VariableOut + Send>(
     controller: Arc<Mutex<Controller<T>>>,
     save_state: Arc<Mutex<save_state::DataWrapper>>,
     shared: Arc<Mutex<SharedState>>,
-) -> kvarn::RunConfig {
+    #[cfg(feature = "esp32")] known_networks: HashMap<String, String>,
+    #[cfg(feature = "esp32")] storage: NvsStorage,
+) -> kvarn::host::Host {
     let mut extensions = Extensions::new();
-
-    let port = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8080);
 
     extensions.with_csp(
         Csp::default()
@@ -513,12 +739,7 @@ fn create_server<T: VariableOut + Send>(
                         {
                             controller.send(Command::RemoveScheduler(s));
                         }
-                        // Can be removed since we check if internal schedulers disappeared.
-                        // save.lock()
-                        //     .unwrap()
-                        //     .get_mut()
-                        //     .mut_schedulers()
-                        //     .retain(|scheduler| scheduler.name != s);
+                        // We don't save since we check if internal schedulers disappeared.
                     }
                     None => {
                         return default_error_response(
@@ -576,6 +797,108 @@ fn create_server<T: VariableOut + Send>(
             }
         ),
     );
+    #[cfg(feature = "esp32")]
+    {
+        let controller = ctl();
+        let nvs = storage.clone();
+        extensions.add_prepare_single(
+            "/set-timezone",
+            prepare!(
+                request,
+                host,
+                _path,
+                _addr,
+                move |nvs: NvsStorage, controller: ControllerSender| {
+                    match get_query_value(request, "timezone") {
+                        Some(timezone) => {
+                            if httpwm::env_timezone::try_set_timezone(&timezone).is_err() {
+                                default_error_response(
+                                StatusCode::BAD_REQUEST,
+                                host,
+                                Some("timezone needs to have the format '[+-]hh:mm' (e.g. +01:00)"),
+                            )
+                            .await
+                            } else {
+                                controller.send(Command::UpdateWake);
+                                let mut lock = nvs.lock().unwrap();
+                                if lock
+                                    .put_raw("timezone.txt", timezone.trim().as_bytes())
+                                    .is_err()
+                                {
+                                    error!("Failed to write timezone");
+                                }
+                                r200()
+                            }
+                        }
+                        None => {
+                            default_error_response(
+                                StatusCode::BAD_REQUEST,
+                                host,
+                                Some("must have query key `timezone` with a timezone offset"),
+                            )
+                            .await
+                        }
+                    }
+                }
+            ),
+        );
+    }
+    // wifi
+    #[cfg(feature = "esp32")]
+    {
+        let nvs = storage.clone();
+        type Networks = Arc<Mutex<HashMap<String, String>>>;
+        let networks = Arc::new(Mutex::new(known_networks));
+        let get_networks = Arc::clone(&networks);
+        extensions.add_prepare_single(
+            "/get-wifi",
+            prepare!(_req, _host, _path, _addr, move |get_networks: Networks| {
+                let lock = get_networks.lock().unwrap();
+                let data = serde_json::to_string(&*lock).unwrap();
+                drop(lock);
+                FatResponse::no_cache(Response::new(Bytes::from(data.into_bytes())))
+            }),
+        );
+        extensions.add_prepare_single(
+            "/set-wifi",
+            prepare!(req, host, _path, _addr, move |networks: Networks, nvs: NvsStorage| {
+                let Ok(data) = read_body(req).await else {
+                    return default_error_response(StatusCode::BAD_REQUEST, host, None).await
+                };
+                let Ok(parsed_networks) = serde_json::from_slice::<'_, HashMap<String, String>>(&data) else {
+                    return default_error_response(StatusCode::BAD_REQUEST, host, None).await
+                };
+                let ser = ron::to_string(&parsed_networks).unwrap();
+                {
+                    let mut lock = networks.lock().unwrap();
+                    *lock = parsed_networks;
+                }
+                {
+                    let mut lock = nvs.lock().unwrap();
+                    if lock.put_raw("networks.ron", ser.as_bytes()).is_err() {
+                        error!("Failed to write networks.ron: {ser}");
+                    }
+                }
+
+                r200()
+            }),
+        );
+    }
+    #[cfg(feature = "esp32")]
+    // serve files
+    {
+        let mut add_path = |path: &str, data: &'static str| {
+            extensions.add_prepare_single(
+                path,
+                prepare!(_, _, _, _, move |data: &'static str| {
+                    FatResponse::cache(Response::new(Bytes::from_static(data.as_bytes())))
+                }),
+            )
+        };
+        add_path("/index.html", INDEX_HTML);
+        add_path("/script.js", SCRIPT_JS);
+        add_path("/style.css", STYLE_CSS);
+    }
 
     let mut localhost = Host::unsecure(
         "localhost",
@@ -584,14 +907,203 @@ fn create_server<T: VariableOut + Send>(
         host::Options::new(),
     );
     localhost.disable_server_cache().disable_client_cache();
-    let hosts = HostCollection::builder().default(localhost).build();
-    RunConfig::new().bind(PortDescriptor::new(port, hosts))
+    localhost.limiter.disable();
+    #[cfg(feature = "esp32")]
+    localhost.options.disable_fs();
+    localhost
 }
+// #[cfg(all(feature = "web", not(feature = "esp32")))]
+#[cfg(feature = "web")]
+fn create_server<T: VariableOut + Send>(
+    controller: Arc<Mutex<Controller<T>>>,
+    save_state: Arc<Mutex<save_state::DataWrapper>>,
+    shared: Arc<Mutex<SharedState>>,
+    #[cfg(feature = "esp32")] known_networks: HashMap<String, String>,
+    #[cfg(feature = "esp32")] storage: NvsStorage,
+) -> kvarn::RunConfig {
+    #[cfg(feature = "esp32")]
+    let default_port = 80;
+    #[cfg(not(feature = "esp32"))]
+    let default_port = 8080;
+    let port = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default_port);
+
+    let localhost = create_host(
+        controller,
+        save_state,
+        shared,
+        #[cfg(feature = "esp32")]
+        known_networks,
+        #[cfg(feature = "esp32")]
+        storage,
+    );
+    let hosts = HostCollection::builder().default(localhost).build();
+    RunConfig::new().bind(PortDescriptor::new(port, hosts).ipv4_only())
+}
+// #[cfg(feature = "esp32")]
+// fn create_server(
+// channel: tokio::sync::mpsc::UnboundedSender<(
+// FatRequest,
+// std::sync::mpsc::SyncSender<Response<Bytes>>,
+// )>,
+// ) -> esp_idf_svc::httpd::ServerRegistry {
+// fn convert_request(req: &mut embedded_svc::httpd::Request, handler_path: &str) -> FatRequest {
+// let qs = req.query_string();
+// let body = kvarn::application::Body::Bytes(Bytes::from(req.as_bytes().unwrap()).into());
+// let mut req = FatRequest::new(body);
+// let mut path =
+// BytesMut::with_capacity(handler_path.len() + qs.as_ref().map_or(0, |qs| 1 + qs.len()));
+// path.extend_from_slice(handler_path.as_bytes());
+// if let Some(qs) = qs {
+// path.extend_from_slice(b"?");
+// path.extend_from_slice(qs.as_bytes());
+// }
+// *req.uri_mut() = Uri::from_maybe_shared(path).unwrap();
+// req
+// }
+// fn convert_response(mut res: Response<Bytes>) -> embedded_svc::httpd::Response {
+// embedded_svc::httpd::Response {
+// status: res.status().as_u16(),
+// status_message: None,
+// headers: res
+// .headers_mut()
+// .into_iter()
+// .map(|(k, v)| {
+// (
+// k.as_str().to_owned(),
+// String::from_utf8_lossy(v.as_bytes()).into_owned(),
+// )
+// })
+// .collect(),
+// body: embedded_svc::httpd::Body::Bytes(res.into_body().into()),
+// new_session_state: None,
+// }
+// }
+
+// use embedded_svc::httpd::{registry::Registry, Method};
+
+// let mut registry = esp_idf_svc::httpd::ServerRegistry::new();
+// macro_rules! add_to_registry {
+// ($path: expr, $method: expr) => {
+// let channel = channel.clone();
+// registry = registry
+// .handler(embedded_svc::httpd::Handler::new(
+// $path,
+// $method,
+// move |mut req| {
+// let request = convert_request(&mut req, $path);
+// let (tx, rx) = std::sync::mpsc::sync_channel(0);
+// channel.send((request, tx)).unwrap();
+// let response = rx.recv().unwrap();
+// Ok(convert_response(response))
+// },
+// ))
+// .unwrap();
+// };
+// }
+// macro_rules! add_file_to_registry {
+// ($path: expr, $file: expr, $ct: expr) => {
+// registry = registry
+// .handler(embedded_svc::httpd::Handler::new(
+// $path,
+// Method::Get,
+// |_req| {
+// let mut headers = std::collections::BTreeMap::new();
+// headers.insert("content-type".into(), $ct.into());
+// let response = embedded_svc::httpd::Response {
+// status: 200,
+// status_message: None,
+// headers,
+// body: embedded_svc::httpd::Body::Bytes($file.as_bytes().to_vec()),
+// new_session_state: None,
+// };
+// Ok(response)
+// },
+// ))
+// .unwrap();
+// };
+// }
+// add_to_registry!("/clear-schedulers", Method::Get);
+// add_to_registry!("/set-strength", Method::Get);
+// add_to_registry!("/set-day-time", Method::Put);
+// add_to_registry!("/transition", Method::Put);
+// add_to_registry!("/get-state", Method::Get);
+// add_to_registry!("/add-scheduler", Method::Put);
+// add_to_registry!("/get-schedulers", Method::Get);
+// add_to_registry!("/remove-schedulers", Method::Get);
+// add_to_registry!("/set-effect", Method::Put);
+// add_file_to_registry!("/", INDEX_HTML, "text/html");
+// add_file_to_registry!("/index.html", INDEX_HTML, "text/html");
+// add_file_to_registry!("/script.js", SCRIPT_JS, "application/javascript");
+// add_file_to_registry!("/style.css", STYLE_CSS, "text/css");
+// registry
+// }
 
 pub fn parse_time(string: &str) -> Option<time::Time> {
     time::Time::parse(string, &SECOND_FORMAT)
         .or_else(|_| time::Time::parse(string, &MINUTE_FORMAT))
         .ok()
+}
+
+#[cfg(feature = "esp32")]
+fn wifi(
+    netif_stack: Arc<EspNetifStack>,
+    sys_loop_stack: Arc<EspSysLoopStack>,
+    default_nvs: Arc<EspDefaultNvs>,
+    networks: &HashMap<String, String>,
+) -> Result<Box<EspWifi>, ()> {
+    let mut wifi =
+        Box::new(EspWifi::new(netif_stack, sys_loop_stack, default_nvs).map_err(|_| ())?);
+
+    info!("Wifi created, about to scan");
+
+    let ap_infos = wifi.scan().map_err(|_| ())?;
+
+    let ours = ap_infos
+        .into_iter()
+        .find_map(|a| networks.get(a.ssid.as_str()).map(|passwd| (a, passwd)));
+
+    let (ap, password) = if let Some((ours, passwd)) = ours {
+        info!(
+            "Found configured access point {} on channel {}",
+            ours.ssid, ours.channel
+        );
+        (ours, passwd)
+    } else {
+        error!("Didn't find the selected WIFI!");
+        return Err(());
+    };
+
+    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+        ssid: ap.ssid,
+        password: password.as_str().into(),
+        channel: Some(ap.channel),
+        auth_method: ap.auth_method,
+        ..Default::default()
+    }))
+    .map_err(|_| ())?;
+
+    info!("Wifi configuration set, about to get status");
+
+    wifi.wait_status_with_timeout(Duration::from_secs(20), |status| !status.is_transitional())
+        .map_err(|e| error!("Unexpected Wifi status: {:?}", e))?;
+
+    let status = wifi.get_status();
+
+    if let Status(
+        ClientStatus::Started(ClientConnectionStatus::Connected(ClientIpStatus::Done(ip_settings))),
+        _,
+    ) = status
+    {
+        info!("Wifi connected at {}", ip_settings.ip);
+    } else {
+        error!("Unexpected Wifi status: {:?}", status);
+        return Err(());
+    }
+
+    Ok(wifi)
 }
 
 #[cfg(feature = "test")]
@@ -797,11 +1309,11 @@ pub mod save_state {
 
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Data {
-        strength: Option<f64>,
-        schedulers: Vec<datas::AddSchedulerData>,
-        week_scheduler: Option<WeekSchedulerData>,
+        pub strength: Option<f64>,
+        pub schedulers: Vec<datas::AddSchedulerData>,
+        pub week_scheduler: Option<WeekSchedulerData>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        current_transition: Option<datas::TransitionData>,
+        pub current_transition: Option<datas::TransitionData>,
     }
     impl Data {
         pub fn read_from_file<P: AsRef<Path>>(

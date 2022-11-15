@@ -333,74 +333,71 @@ impl State {
 
     pub fn process(&mut self, command: Option<Command>) -> Action {
         match command {
-            Some(command) => match command {
-                Command::Finish => {
-                    // set finish flag
-                    self.finish = true;
-                    match self.get_transition_output() {
-                        // if no animation is going, return break
-                        None => Action::Break,
-                        // else return get_output
-                        // Ok, because a transition exists, which will yield a value
-                        Some(s) => Action::Set(s),
-                    }
+            Some(Command::Finish) => {
+                // set finish flag
+                self.finish = true;
+                match self.get_transition_output() {
+                    // if no animation is going, return break
+                    None => Action::Break,
+                    // else return get_output
+                    // Ok, because a transition exists, which will yield a value
+                    Some(s) => Action::Set(s),
                 }
-                Command::Set(strength) => {
-                    // clear animation
-                    self.transition = None;
-                    self.effect = None;
-                    self.shared.lock().unwrap().set_strength(strength);
-                    // send back set
-                    Action::Set(strength)
+            }
+            Some(Command::Set(strength)) => {
+                // clear animation
+                self.transition = None;
+                self.effect = None;
+                self.shared.lock().unwrap().set_strength(strength);
+                // send back set
+                Action::Set(strength)
+            }
+            Some(Command::ChangeDayTimer(day, time)) => {
+                // change time of day
+                {
+                    let mut lock = self.shared.lock().unwrap();
+                    *lock.mut_week_scheduler().get_mut(day) = time;
+                    lock.mut_week_scheduler().last = None;
                 }
-                Command::ChangeDayTimer(day, time) => {
-                    // change time of day
-                    {
-                        let mut lock = self.shared.lock().unwrap();
-                        *lock.mut_week_scheduler().get_mut(day) = time;
-                        lock.mut_week_scheduler().last = None;
-                    }
-                    self.get_next()
+                self.get_next()
+            }
+            Some(Command::ChangeDayTimerTransition(new_transition)) => {
+                {
+                    self.shared.lock().unwrap().mut_week_scheduler().transition = new_transition;
                 }
-                Command::ChangeDayTimerTransition(new_transition) => {
-                    {
-                        self.shared.lock().unwrap().mut_week_scheduler().transition =
-                            new_transition;
-                    }
-                    self.get_next()
-                }
-                Command::AddReplaceScheduler(name, scheduler) => {
-                    self.shared
-                        .lock()
-                        .unwrap()
-                        .mut_schedulers()
-                        .insert(name, scheduler);
-                    self.get_next()
-                }
-                Command::RemoveScheduler(name) => {
-                    self.shared.lock().unwrap().mut_schedulers().remove(&name);
-                    self.get_next()
-                }
-                Command::ClearAllSchedulers => {
-                    self.shared.lock().unwrap().mut_schedulers().clear();
-                    self.get_next()
-                }
-                Command::SetTransition(transition) => {
-                    self.shared
-                        .lock()
-                        .unwrap()
-                        .set_transition(Some(Transition::clone(&transition)));
-                    self.transition = Some(TransitionState::new(transition));
-                    self.last_instance = Instant::now();
-                    // unwrap() is ok; we've just set transition to be `Some`
-                    Action::Set(self.get_transition_output().unwrap())
-                }
-                Command::SetEffect(e) => {
-                    self.effect = Some(e);
-                    Action::Set(self.get_transition_output().unwrap())
-                }
-            },
-            None => {
+                self.get_next()
+            }
+            Some(Command::AddReplaceScheduler(name, scheduler)) => {
+                self.shared
+                    .lock()
+                    .unwrap()
+                    .mut_schedulers()
+                    .insert(name, scheduler);
+                self.get_next()
+            }
+            Some(Command::RemoveScheduler(name)) => {
+                self.shared.lock().unwrap().mut_schedulers().remove(&name);
+                self.get_next()
+            }
+            Some(Command::ClearAllSchedulers) => {
+                self.shared.lock().unwrap().mut_schedulers().clear();
+                self.get_next()
+            }
+            Some(Command::SetTransition(transition)) => {
+                self.shared
+                    .lock()
+                    .unwrap()
+                    .set_transition(Some(Transition::clone(&transition)));
+                self.transition = Some(TransitionState::new(transition));
+                self.last_instance = Instant::now();
+                // unwrap() is ok; we've just set transition to be `Some`
+                Action::Set(self.get_transition_output().unwrap())
+            }
+            Some(Command::SetEffect(e)) => {
+                self.effect = Some(e);
+                Action::Set(self.get_transition_output().unwrap())
+            }
+            None | Some(Command::UpdateWake) => {
                 // check wake up Option<>
                 match self.wake() {
                     Some(command) => {

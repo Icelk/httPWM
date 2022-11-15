@@ -32,6 +32,16 @@ let effectUrl = document.getElementById("effect-remote-url")
 let effectSubmit = document.getElementById("effect-submit")
 let effectReset = document.getElementById("effect-reset")
 
+let timezoneInput = document.getElementById("timezone-input")
+let timezone = document.getElementById("timezone")
+let timezoneHeader = document.getElementById("timezone-header")
+let wifi = document.getElementById("wifi")
+let wifiHeader = document.getElementById("wifi-header")
+let wifiTable = document.getElementById("wifi-table")
+let wifiInputName = document.getElementById("wifi-name")
+let wifiInputPassword = document.getElementById("wifi-password")
+let wifiAdd = document.getElementById("wifi-add")
+
 /**
  * @type { {[name: string]: {backlog: Event[], inTimeout: boolean}} }
  */
@@ -149,7 +159,7 @@ async function sendSet(strength) {
 // Time can be null or "HH:MM:SS" format.
 async function sendDayTime(day, time) {
     let response = await fetch("/set-day-time", {
-        method: "POST",
+        method: "PUT",
         headers: {
             "content-type": "application/json",
         },
@@ -179,7 +189,7 @@ function getTransition() {
 }
 async function getAndSetTransition(action) {
     let response = await fetch(`/transition?action=${action}`, {
-        method: "POST",
+        method: "PUT",
         headers: {
             "content-type": "application/json",
         },
@@ -309,7 +319,7 @@ async function getAndAddScheduler() {
     console.log(body)
 
     let response = await fetch("/add-scheduler", {
-        method: "POST",
+        method: "PUT",
         headers: {
             "content-type": "application/json",
         },
@@ -597,9 +607,72 @@ effectReset.addEventListener("click", () => {
     mainStrength.value = 0
 })
 
+timezoneInput.addEventListener("change", async () => {
+    let v = timezoneInput.value.trim()
+    if (v === "") {
+        return
+    }
+    let response = await fetch(`/set-timezone?timezone=${v}`)
+    if (response.ok) {
+        sendNotification(`Set timezone to ${v}`, notificationInfo)
+    } else {
+        sendNotification(`Failed to set timezone. Check your formatting`, notificationError)
+    }
+})
+
 load()
 checkTransitionExtras()
 checkDailySchedulerOption()
 checkSchedulerAddExtras()
 effectRemotes = JSON.parse(localStorage.getItem("effect-remotes") ?? "{}") ?? {}
 updateEffectPreview(true)
+
+let currentNetworks = {}
+async function updateWifi() {
+    let response = await fetch("/set-wifi", { method: "PUT", body: JSON.stringify(currentNetworks) })
+    if (!response.ok) {
+        sendNotification("Failed to set wifi", notificationError)
+    }
+}
+function renderWifi() {
+    while (wifiTable.children.length > 0) {
+        wifiTable.children[0].remove()
+    }
+    for (const wifiName in currentNetworks) {
+        const wifiPassword = currentNetworks[wifiName]
+        let tr = document.createElement("tr")
+        let name = document.createElement("td")
+        name.innerText = wifiName
+        let password = document.createElement("td")
+        password.innerText = wifiPassword
+        let remove = document.createElement("td")
+        remove.classList.add("wifi-remove")
+        remove.innerText = "remove"
+        remove.addEventListener("click", () => {
+            delete currentNetworks[wifiName]
+            renderWifi()
+            updateWifi()
+        })
+
+        tr.appendChild(name)
+        tr.appendChild(password)
+        tr.appendChild(remove)
+        wifiTable.appendChild(tr)
+    }
+}
+wifiAdd.addEventListener("click", () => {
+    currentNetworks[wifiInputName.value] = wifiInputPassword.value
+    renderWifi()
+    updateWifi()
+})
+fetch("/get-wifi").then(async (response) => {
+    if (response.ok) {
+        timezoneHeader.style.display = ""
+        timezone.style.display = ""
+        wifi.style.display = ""
+        wifiHeader.style.display = ""
+        let data = await response.json()
+        currentNetworks = data
+        renderWifi()
+    }
+})

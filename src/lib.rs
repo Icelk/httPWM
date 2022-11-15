@@ -1,5 +1,11 @@
 pub mod scheduler;
 
+#[cfg(feature = "esp32")]
+use esp_idf_hal::{
+    gpio::OutputPin,
+    ledc::{Channel, HwChannel, HwTimer, Timer},
+};
+#[cfg(feature = "rpi")]
 use rppal::{gpio::OutputPin, pwm::Pwm};
 pub use scheduler::{Next, Scheduler, WeekScheduler};
 use std::collections::HashMap;
@@ -19,10 +25,22 @@ lazy_static::lazy_static! {
 }
 
 #[cfg(not(feature = "auto-tz"))]
-mod env_timezone {
+pub mod env_timezone {
     pub static TIMEZONE: Option<&'static str> = option_env!("TIMEZONE");
     pub static TZ_FORMAT: &[time::format_description::FormatItem] =
         time::macros::format_description!("[offset_hour]:[offset_minute]");
+
+    pub static SET_TIMEZONE: std::sync::Mutex<Option<time::UtcOffset>> =
+        std::sync::Mutex::new(None);
+
+    pub fn try_set_timezone(tz: &str) -> Result<(), ()> {
+        if let Ok(tz) = time::UtcOffset::parse(tz, &TZ_FORMAT) {
+            *SET_TIMEZONE.lock().unwrap() = Some(tz);
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
 
     pub struct UnresolvedTz(time::OffsetDateTime);
     impl UnresolvedTz {
@@ -60,6 +78,10 @@ pub fn get_timezone() -> Option<&'static time_tz::Tz> {
 }
 #[cfg(not(feature = "auto-tz"))]
 pub fn get_timezone() -> Option<time::UtcOffset> {
+    let set_timezone = env_timezone::SET_TIMEZONE.lock().unwrap();
+    if let Some(tz) = *set_timezone {
+        return Some(tz);
+    }
     if let Some(tz) = env_timezone::TIMEZONE {
         time::UtcOffset::parse(tz, &env_timezone::TZ_FORMAT).ok()
     } else {
@@ -239,6 +261,7 @@ pub enum Command {
     ClearAllSchedulers,
     SetEffect(Effect),
     Finish,
+    UpdateWake,
 }
 impl Command {
     pub fn can_clone(&self) -> bool {
@@ -250,7 +273,8 @@ impl Command {
             | Self::RemoveScheduler(_)
             | Self::ClearAllSchedulers
             | Self::SetEffect(_)
-            | Self::Finish => true,
+            | Self::Finish
+            | Self::UpdateWake => true,
             Self::AddReplaceScheduler(_, _) => false,
         }
     }
@@ -283,6 +307,7 @@ impl Clone for ClonableCommand {
             Command::ClearAllSchedulers => Command::ClearAllSchedulers,
             Command::SetEffect(e) => Command::SetEffect(e.clone()),
             Command::Finish => Command::Finish,
+            Command::UpdateWake => Command::UpdateWake,
 
             Command::AddReplaceScheduler(_, _) => {
                 unreachable!("should have been checked when creating `ClonableCommand`")
@@ -313,6 +338,7 @@ pub trait VariableOut {
     /// Used to prepare the out device. Used for optimizing; internal guarantees.
     fn prepare(&mut self);
 }
+#[cfg(feature = "rpi")]
 impl VariableOut for Pwm {
     fn set(&mut self, value: Strength) {
         self.set_pulse_width(Duration::from_nanos((value.0 * 1000000.0).round() as u64))
@@ -333,6 +359,7 @@ impl VariableOut for Pwm {
             .expect("failed to set period in `enable()`");
     }
 }
+#[cfg(feature = "rpi")]
 impl VariableOut for OutputPin {
     fn set(&mut self, value: Strength) {
         self.set_pwm(
@@ -344,6 +371,29 @@ impl VariableOut for OutputPin {
     fn enable(&mut self) {}
     fn disable(&mut self) {
         OutputPin::clear_pwm(self).expect("failed to stop software PWM")
+    }
+    fn prepare(&mut self) {}
+}
+#[cfg(feature = "esp32")]
+impl<C: HwChannel, H: HwTimer, T: std::borrow::Borrow<Timer<H>>, P: OutputPin> VariableOut
+    for Channel<C, H, T, P>
+{
+    fn set(&mut self, value: Strength) {
+        let max_duty = self.get_max_duty();
+        self.set_duty((max_duty as f64 * value.into_inner()) as u32)
+            .expect("Failed to set PWM duty cycle on esp32");
+        println!(
+            "Set duty to {}/{max_duty}",
+            (max_duty as f64 * value.into_inner()) as u32
+        );
+    }
+    fn enable(&mut self) {
+        println!("Enabling hardware PWM.");
+        Channel::enable(self).expect("failed to enable hardware PWM");
+    }
+    fn disable(&mut self) {
+        println!("Disabling hardware PWM.");
+        Channel::disable(self).expect("failed to disable hardware PWM");
     }
     fn prepare(&mut self) {}
 }
@@ -366,6 +416,13 @@ impl VariableOut for PrintOut {
     }
 }
 
+#[cfg(feature = "esp32")]
+pub fn get_now() -> time::OffsetDateTime {
+    use embedded_svc::sys_time::SystemTime;
+    let time = time::OffsetDateTime::UNIX_EPOCH + esp_idf_svc::systime::EspSystemTime.now();
+    get_timezone().map_or(time, |offset| time.to_timezone(offset))
+}
+#[cfg(not(feature = "esp32"))]
 pub fn get_now() -> time::OffsetDateTime {
     let time = time::OffsetDateTime::now_utc();
     get_timezone().map_or(time, |offset| time.to_timezone(offset))

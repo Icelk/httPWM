@@ -16,9 +16,8 @@ required-features = ["bin"]
 name = "httpwm"
 
 [dependencies]
-rppal = "^0.13"
 ron = "^0.8"
-kvarn = { version = "^0.5", default-features = false, optional = true }
+kvarn = { version = "^0.5", default-features = false, path = "../kvarn", optional = true }
 time = { version = "0.3.7", features = ["parsing", "formatting", "macros"] }
 serde = { version = "^1", optional = true, features = ["derive"] }
 serde_json = { version = "^1", optional = true }
@@ -27,10 +26,27 @@ tokio = { version = "^1", optional = true, features = ["macros"] }
 time-tz = { version = "1.0.2", features = ["system"], optional = true }
 lazy_static = "1.4.0"
 libc = { version = "0.2.134", optional = true }
+env_logger = { version = "0.9.1", optional = true, default-features = false, features = ["termcolor"] }
+
+# Raspberry Pi
+rppal = { version = "^0.13", optional = true }
+
+# esp32
+esp-idf-sys = { version = "0.31", optional = true, features = ["binstart"] }
+esp-idf-svc = { version = "0.42.1", optional = true, features = ["experimental"] }
+esp-idf-hal = { version = "0.38", optional = true, features = ["experimental"] }
+embedded-svc = { version = "0.22", optional = true, features = ["experimental"] }
+
+[build-dependencies]
+embuild = { version = "0.29", optional = true }
 
 [features]
-default = ["bin", "auto-tz"]
+default = ["bin", "auto-tz", "kvarn/async-networking"]
 bin = ["web"]
+
+# hardware support
+rpi = ["rppal", "env_logger"]
+esp32 = ["esp-idf-sys", "esp-idf-svc", "esp-idf-hal", "embedded-svc", "embuild"]
 
 # get timezone from system
 # brings in lots of dependencies and doesn't work on embedded
@@ -38,10 +54,10 @@ bin = ["web"]
 auto-tz = ["time-tz"]
 web = ["kvarn", "tokio", "json", "percent-encoding"]
 json = ["serde", "serde_json"]
-test = ["libc"]
+test = ["libc", "env_logger"]
 
 [profile.distribution]
 inherits = "release"
-opt-level = "z"
+opt-level = "s"
 lto = true
 strip = true
