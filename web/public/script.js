@@ -47,6 +47,13 @@ let wifiAdd = document.getElementById("wifi-add")
  */
 let throttle_instances = {}
 
+async function sleep(ms) {
+    await new Promise((resolve) => {
+        setTimeout(() => {
+            resolve()
+        }, ms)
+    })
+}
 /**
  * Throttles calling `callback` to every `interval` milliseconds.
  * If this is called more than once in the hang period, only the latest callback is called.
@@ -75,16 +82,20 @@ async function throttle(name, interval, callback) {
 
     await callback()
 
-    instance.inTimeout = true
-    setTimeout(async () => {
-        instance.inTimeout = false
+    while (true) {
+        instance.inTimeout = true
+        await sleep(interval)
         let item = instance.backlog.pop()
 
         if (item !== undefined) {
             instance.backlog.length = 0
             await item()
         }
-    }, interval)
+        instance.inTimeout = false
+        if (instance.length === 0) {
+            break
+        }
+    }
 }
 
 window.addEventListener("unhandledrejection", (message) => {
