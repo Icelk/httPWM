@@ -180,7 +180,7 @@ async function sendDayTime(day, time) {
     responseNotification(response, "Set day time")
     // Takes a bit of time in backend to send message between threads...
     // (it's to damn fast)
-    setTimeout(async () => await getAndApplyState(), 50)
+    setTimeout(async () => await fetchState(), 50)
 }
 function getAndSendDayTime() {
     if (dayOption.value === "some") {
@@ -216,7 +216,7 @@ function checkDailySchedulerOption() {
     dayTime.style.display = dayOption.value === "some" ? "initial" : "none"
 }
 
-async function getAndApplyState() {
+async function fetchState() {
     let response = await fetch("/get-state")
     responseNotification(response, "Update state", true)
 
@@ -341,20 +341,11 @@ async function getAndAddScheduler() {
     await overrideSchedulerList()
 }
 
-async function load() {
-    let state = getAndApplyState()
-    let schedulers = overrideSchedulerList()
-
-    let h2s = document.getElementsByTagName("h2")
-    let loadedData = JSON.parse(localStorage.getItem("collapsed"))
-    if (loadedData === null) {
-        loadedData = {}
-        localStorage.setItem("collapsed", JSON.stringify({}))
-    }
-    for (const header of h2s) {
-        const target = header.getAttribute("toggle")
-        if (target !== null) {
-            const toggled = document.getElementById(target)
+function initCollapsibleHeader(header, loadedData) {
+    const target = header.getAttribute("toggle")
+    if (target !== null) {
+        const toggled = document.getElementById(target)
+        if (toggled.style.maxHeight === "") {
             header.addEventListener("click", () => {
                 let data = JSON.parse(localStorage.getItem("collapsed"))
 
@@ -373,20 +364,34 @@ async function load() {
                 localStorage.setItem("collapsed", JSON.stringify(data))
             })
             header.classList.add("collapse-host")
-
-            if (loadedData !== null && loadedData[target] === "expanded") {
-                // so the UI has time to draw, so we can get scrollHeight
-                toggled.style.maxHeight = `100vh`
-                setTimeout(() => {
-                    toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`
-                }, 0)
-
-                header.classList.add("expanded")
-            } else {
-                toggled.style.maxHeight = "0px"
-            }
-            toggled.classList.add("collapsible")
         }
+
+        if (loadedData !== null && loadedData[target] === "expanded" && toggled.style.display !== "none") {
+            // so the UI has time to draw, so we can get scrollHeight
+            toggled.style.maxHeight = `100vh`
+            setTimeout(() => {
+                toggled.style.maxHeight = `calc(${toggled.scrollHeight}px + 2em)`
+            }, 0)
+
+            header.classList.add("expanded")
+        } else {
+            toggled.style.maxHeight = "0px"
+        }
+        toggled.classList.add("collapsible")
+    }
+}
+async function load() {
+    let state = fetchState()
+    let schedulers = overrideSchedulerList()
+
+    let h2s = document.getElementsByTagName("h2")
+    let loadedData = JSON.parse(localStorage.getItem("collapsed"))
+    if (loadedData === null) {
+        loadedData = {}
+        localStorage.setItem("collapsed", JSON.stringify({}))
+    }
+    for (const header of h2s) {
+        initCollapsibleHeader(header, loadedData)
     }
 
     await Promise.all([state, schedulers])
@@ -650,12 +655,9 @@ function renderWifi() {
         wifiTable.children[0].remove()
     }
     for (const wifiName in currentNetworks) {
-        const wifiPassword = currentNetworks[wifiName]
         let tr = document.createElement("tr")
         let name = document.createElement("td")
         name.innerText = wifiName
-        let password = document.createElement("td")
-        password.innerText = wifiPassword
         let remove = document.createElement("td")
         remove.classList.add("wifi-remove")
         remove.innerText = "remove"
@@ -666,7 +668,6 @@ function renderWifi() {
         })
 
         tr.appendChild(name)
-        tr.appendChild(password)
         tr.appendChild(remove)
         wifiTable.appendChild(tr)
     }
@@ -682,6 +683,17 @@ fetch("/get-wifi").then(async (response) => {
         timezone.style.display = ""
         wifi.style.display = ""
         wifiHeader.style.display = ""
+
+        let loadedData = JSON.parse(localStorage.getItem("collapsed"))
+        initCollapsibleHeader(timezoneHeader, loadedData)
+        initCollapsibleHeader(wifiHeader, loadedData)
+
+        // update shown timezone
+        ;(async () => {
+            let activeTimezone = await (await fetch("/get-timezone")).text()
+            timezoneInput.value = activeTimezone
+        })()
+
         let data = await response.json()
         currentNetworks = data
         renderWifi()

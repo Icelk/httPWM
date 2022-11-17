@@ -279,25 +279,29 @@
         </div>
         <h2 id="timezone-header" style="display: none" toggle="timezone">Timezone (esp32)</h2>
         <div id="timezone" style="display: none">
-            <p>Change the timezone. Examples: <code>+01:00</code> for CET</p>
-            <input id="timezone-input" placeholder="[+-]HH:MM" />
+            <span class="collapsible-child">
+                <p>Change the timezone. Examples: <code>+01:00</code> for CET</p>
+                <input id="timezone-input" placeholder="[+-]HH:MM" />
+            </span>
         </div>
         <h2 id="wifi-header" style="display: none" toggle="wifi">WiFi (esp32)</h2>
         <div id="wifi" style="display: none">
-            <p>Add or remove remembered wireless networks</p>
-            <input id="wifi-name" placeholder="Wifi name..." type="text" />
-            <input
-                id="wifi-password"
-                placeholder="Wifi password (empty for open networks)..."
-                type="text"
-                style="min-width: 16rem"
-            />
-            <button id="wifi-add">Add wifi</button>
-            <br />
-            <span class="table-round center m-top">
-                <table>
-                    <tbody id="wifi-table"></tbody>
-                </table>
+            <span class="collapsible-child">
+                <p>Add or remove remembered wireless networks</p>
+                <input id="wifi-name" placeholder="Wifi name..." type="text" />
+                <input
+                    id="wifi-password"
+                    placeholder="Wifi password (empty for open networks)..."
+                    type="text"
+                    style="min-width: 16rem"
+                />
+                <button id="wifi-add">Add wifi</button>
+                <br />
+                <span class="table-round center m-top">
+                    <table>
+                        <tbody id="wifi-table"></tbody>
+                    </table>
+                </span>
             </span>
         </div>
         <div style="height: 20em"></div>

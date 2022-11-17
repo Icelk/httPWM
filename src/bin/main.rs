@@ -842,6 +842,14 @@ fn create_host<T: VariableOut + Send>(
                 }
             ),
         );
+        extensions.add_prepare_single(
+            "/get-timezone",
+            prepare!(_req, _host, _path, _addr, {
+                let timezone = httpwm::get_timezone().unwrap_or(time::UtcOffset::UTC);
+                let data = timezone.format(&httpwm::env_timezone::TZ_FORMAT).unwrap();
+                FatResponse::no_cache(Response::new(Bytes::from(data.into_bytes())))
+            }),
+        );
     }
     // wifi
     #[cfg(feature = "esp32")]

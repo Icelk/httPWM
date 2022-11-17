@@ -28,7 +28,7 @@ lazy_static::lazy_static! {
 pub mod env_timezone {
     pub static TIMEZONE: Option<&'static str> = option_env!("TIMEZONE");
     pub static TZ_FORMAT: &[time::format_description::FormatItem] =
-        time::macros::format_description!("[offset_hour]:[offset_minute]");
+        time::macros::format_description!("[offset_hour sign:mandatory]:[offset_minute]");
 
     pub static SET_TIMEZONE: std::sync::Mutex<Option<time::UtcOffset>> =
         std::sync::Mutex::new(None);
