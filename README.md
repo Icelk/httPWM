@@ -1,8 +1,8 @@
-# \*htt**\*PWM**
+# _htt_**PWM**
 
 > httPWM is a web-driven PWM controller supported by a custom backend.
 
-The backend consists of my web server [Iselk/kvarn](https://github.com/Icelk/kvarn)
+The backend consists of my web server [Icelk/kvarn](https://github.com/Icelk/kvarn)
 and a custom-built event-loop.
 
 It's goal is to enable software control over PWM output on the Raspberry Pi and ESP32,
