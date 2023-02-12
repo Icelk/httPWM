@@ -21,7 +21,7 @@ pub enum Next {
     At(OffsetDateTime, Command),
     Unknown,
 }
-/// Now, represented as a [`chrono::NaiveDateTime`], being lazily evaluated.
+/// Now, represented as a [`time::OffsetDateTime`], being lazily evaluated.
 /// Should not be used long after it's initiation, since `now` stays the same after the first call to [`LazyNow::now()`].
 pub struct LazyNow {
     now: Option<OffsetDateTime>,
